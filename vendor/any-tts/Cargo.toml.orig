@@ -1,0 +1,109 @@
+[package]
+name = "any-tts"
+version = "0.1.2"
+edition = "2021"
+rust-version = "1.83"
+description = "A Rust TTS library with Candle backends and runtime adapters for modern open TTS models"
+license = "MIT OR Apache-2.0"
+readme = "README.md"
+homepage = "https://flow-like.com"
+documentation = "https://docs.rs/any-tts"
+repository = "https://github.com/TM9657/any-tts"
+keywords = ["tts", "text-to-speech", "candle", "ml", "audio"]
+categories = ["multimedia::audio", "science"]
+include = [
+	"/README.md",
+	"/CODE_OF_CONDUCT.md",
+	"/CONTRIBUTING.md",
+	"/SECURITY.md",
+	"/SUPPORT.md",
+	"/examples/**",
+	"/src/**",
+	"/tests/**",
+]
+
+[package.metadata.docs.rs]
+no-default-features = true
+features = ["download"]
+
+[[example]]
+name = "benchmark_omnivoice"
+required-features = ["omnivoice"]
+
+[[example]]
+name = "generate_kokoro"
+required-features = ["kokoro"]
+
+[[example]]
+name = "generate_omnivoice"
+required-features = ["omnivoice"]
+
+[[example]]
+name = "generate_qwen3_tts"
+required-features = ["qwen3-tts"]
+
+[[example]]
+name = "quick_test_qwen3"
+required-features = ["qwen3-tts"]
+
+[[example]]
+name = "generate_vibevoice"
+required-features = ["vibevoice"]
+
+[[example]]
+name = "generate_vibevoice_realtime"
+required-features = ["vibevoice"]
+
+[[example]]
+name = "generate_voxtral"
+required-features = ["voxtral"]
+
+[[test]]
+name = "test_kokoro"
+required-features = ["kokoro"]
+
+[[test]]
+name = "test_omnivoice"
+required-features = ["omnivoice"]
+
+[[test]]
+name = "test_qwen3_tts"
+required-features = ["qwen3-tts"]
+
+[features]
+default = ["qwen3-tts", "kokoro", "omnivoice", "vibevoice", "voxtral", "download"]
+cuda = ["candle-core/cuda", "candle-nn/cuda", "candle-transformers/cuda"]
+metal = ["candle-core/metal", "candle-nn/metal", "candle-transformers/metal"]
+accelerate = ["candle-core/accelerate", "candle-nn/accelerate", "candle-transformers/accelerate"]
+qwen3-tts = []
+kokoro = ["dep:kana2phone", "dep:lindera", "dep:pinyin"]
+omnivoice = []
+vibevoice = []
+voxtral = []
+download = ["dep:reqwest"]
+
+[dependencies]
+base64 = "0.22"
+candle-core = "0.10.2"
+candle-nn = "0.10.2"
+candle-transformers = "0.10.2"
+rustc-hash = "1.1"
+rustfft = "6"
+safetensors = "0.7.0"
+nanomp3 = "0.1.1"
+tiktoken-rs = "0.9.1"
+tokenizers = "0.22.2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+tracing = "0.1"
+zip = { version = "7.2", default-features = false }
+kana2phone = { version = "0.3", optional = true }
+lindera = { version = "2.3.4", default-features = false, features = ["embed-ipadic"], optional = true }
+pinyin = { version = "0.11", default-features = false, features = ["plain", "with_tone_num_end"], optional = true }
+reqwest = { version = "0.12", optional = true, default-features = false, features = ["blocking", "rustls-tls"] }
+
+[dev-dependencies]
+hound = "3.5"
+tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
+anyhow = "1"

@@ -15,10 +15,18 @@
 /// Hook registration — in ~/.claude/settings.json "Stop" array:
 ///     {"type": "command", "command": "crustytts"}
 ///
+/// Pronunciation: upstream `any-tts` ships a hand-rolled English G2P with an
+/// 80-word dictionary that mangles ordinary text ("Claude" -> `klæjuːd`, heard
+/// as "ca-laa-due"). `vendor/any-tts` patches it to use real eSpeak NG — the
+/// system `espeak-ng`/`espeak` binary when installed (the only tier with true
+/// American vowels, matching Kokoro's `af_*` voices), otherwise a pure-Rust
+/// eSpeak port with data embedded at compile time.
+///
 /// Environment variables:
 ///   CLAUDE_TTS_LLM             Ollama model for summarization  (default: qwen3:8b)
 ///   CLAUDE_TTS_VOICE           Kokoro voice id                 (default: af_heart)
 ///   CRUSTYTTS_KOKORO_MODEL     Path to Kokoro model directory  (auto-detected from HF cache)
+///   CRUSTYTTS_ESPEAK_DATA      Where to unpack bundled eSpeak data (default: ~/.cache/crustytts)
 
 use std::env;
 use std::fs::File;
