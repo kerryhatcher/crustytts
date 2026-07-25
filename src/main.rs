@@ -317,125 +317,6 @@ fn summarize(context: &str) -> String {
     naive_fallback(context)
 }
 
-// ── text normalization ──────────────────────────────────────────────────────────
-
-/// Expand constructs that `voice-g2p` silently drops.
-///
-/// Its dictionary handles `$50`, `100%`, and `v1.2.3` correctly, but two cases
-/// lose tokens outright rather than mispronouncing them — which is worse for a
-/// notification, since the sentence comes out confidently wrong:
-///
-///   "at 3:30 PM" -> "æt θˈɜɹTi pˌiˈɛm"   the hour vanishes; 1:00 became "zero zero"
-///   "Feb 2nd"    -> " sˈɛkənd "           the month vanishes ("February" is fine)
-///
-/// Rewriting to words before phonemization sidesteps both.
-fn normalize_for_tts(text: &str) -> String {
-    let mut out = String::with_capacity(text.len() + 16);
-    let chars: Vec<char> = text.chars().collect();
-    let mut i = 0;
-
-    while i < chars.len() {
-        if let Some((spoken, len)) = match_clock_time(&chars, i) {
-            out.push_str(&spoken);
-            i += len;
-            continue;
-        }
-        if let Some((spoken, len)) = match_month_abbrev(&chars, i) {
-            out.push_str(spoken);
-            i += len;
-            continue;
-        }
-        out.push(chars[i]);
-        i += 1;
-    }
-
-    out
-}
-
-/// Rewrite `H:MM` at `start` as spoken words, e.g. "3:30" -> "3 30", "1:00" -> "1 o'clock".
-///
-/// Only fires at a word boundary and when the minutes are two digits, so version
-/// strings and ratios ("50/50", "v1.2.3") are left for the dictionary to handle.
-fn match_clock_time(chars: &[char], start: usize) -> Option<(String, usize)> {
-    if start > 0 && (chars[start - 1].is_alphanumeric() || chars[start - 1] == ':') {
-        return None;
-    }
-
-    let hour_len = (0..2)
-        .take_while(|n| chars.get(start + n).is_some_and(char::is_ascii_digit))
-        .count();
-    if hour_len == 0 || chars.get(start + hour_len) != Some(&':') {
-        return None;
-    }
-
-    let m = start + hour_len + 1;
-    let minute: String = (0..2)
-        .filter_map(|n| chars.get(m + n).filter(|c| c.is_ascii_digit()))
-        .collect();
-    if minute.len() != 2 {
-        return None;
-    }
-    // A third digit means this isn't a clock time.
-    if chars.get(m + 2).is_some_and(char::is_ascii_digit) {
-        return None;
-    }
-
-    let hour: String = chars[start..start + hour_len].iter().collect();
-    let spoken = match minute.as_str() {
-        "00" => format!("{hour} o'clock"),
-        // "9:05" reads as "nine oh five", not "nine five".
-        _ if minute.starts_with('0') => format!("{hour} oh {}", &minute[1..]),
-        _ => format!("{hour} {minute}"),
-    };
-
-    Some((spoken, hour_len + 3))
-}
-
-/// Expand a month abbreviation at `start` to its full name.
-///
-/// Only the abbreviations voice-g2p drops; `Sept` already works, and full month
-/// names always did.
-fn match_month_abbrev(chars: &[char], start: usize) -> Option<(&'static str, usize)> {
-    const MONTHS: &[(&str, &str)] = &[
-        ("Jan", "January"),
-        ("Feb", "February"),
-        ("Mar", "March"),
-        ("Apr", "April"),
-        ("Jun", "June"),
-        ("Jul", "July"),
-        ("Aug", "August"),
-        ("Oct", "October"),
-        ("Nov", "November"),
-        ("Dec", "December"),
-    ];
-
-    if start > 0 && chars[start - 1].is_alphanumeric() {
-        return None;
-    }
-
-    for (abbrev, full) in MONTHS {
-        let len = abbrev.len();
-        let matches = abbrev
-            .chars()
-            .enumerate()
-            .all(|(n, c)| chars.get(start + n) == Some(&c));
-        if !matches {
-            continue;
-        }
-        // Must end the word — optionally with a period ("Feb." or "Feb"), but
-        // never mid-word, so "January" isn't clipped to "JanuaryuARY".
-        let after = chars.get(start + len);
-        let consumed = match after {
-            Some('.') => len + 1,
-            Some(c) if c.is_alphanumeric() => continue,
-            _ => len,
-        };
-        return Some((full, consumed));
-    }
-
-    None
-}
-
 // ── TTS ─────────────────────────────────────────────────────────────────────────
 
 /// Synthesize and play `text` using Kokoro TTS (82M neural model, pure Rust).
@@ -470,7 +351,9 @@ fn speak(text: &str) {
     // Serialize audio output — multiple Claude Code sessions won't talk over each other
     let _lock = acquire_speaker_lock();
 
-    let text = &normalize_for_tts(text);
+    // Normalize here, not deeper in the stack: any-tts splits clauses on ':'
+    // before G2P runs, which is what tears "3:30" apart in the first place.
+    let text = &crustytts_lib::normalize(text);
 
     match speak_kokoro(text) {
         Ok(()) => return,
@@ -743,49 +626,4 @@ fn main() -> anyhow::Result<()> {
     // Signal Claude Code and exit (non-blocking)
     println!("{{\"continue\": true, \"suppressOutput\": true}}");
     Ok(())
-}
-
-// ── tests ───────────────────────────────────────────────────────────────────────
-
-#[cfg(test)]
-mod tests {
-    use super::normalize_for_tts;
-
-    /// Times: voice-g2p drops everything before the colon, so "1:00" spoke as
-    /// "zero zero" — confidently wrong rather than merely odd.
-    #[test]
-    fn expands_clock_times() {
-        assert_eq!(normalize_for_tts("at 3:30 PM"), "at 3 30 PM");
-        assert_eq!(normalize_for_tts("done at 1:00"), "done at 1 o'clock");
-        assert_eq!(normalize_for_tts("sync at 9:05"), "sync at 9 oh 5");
-        assert_eq!(normalize_for_tts("12:45"), "12 45");
-    }
-
-    /// Month abbreviations: voice-g2p drops these entirely, though it handles
-    /// the spelled-out names and "Sept" fine.
-    #[test]
-    fn expands_month_abbreviations() {
-        assert_eq!(normalize_for_tts("Feb 2nd"), "February 2nd");
-        assert_eq!(normalize_for_tts("Dec 25"), "December 25");
-        assert_eq!(normalize_for_tts("Jan. 3rd"), "January 3rd");
-    }
-
-    /// A month name must not be clipped by its own prefix.
-    #[test]
-    fn leaves_full_month_names_alone() {
-        assert_eq!(normalize_for_tts("January 5th"), "January 5th");
-        assert_eq!(normalize_for_tts("December"), "December");
-    }
-
-    /// Constructs voice-g2p already gets right must reach it untouched.
-    #[test]
-    fn leaves_non_times_alone() {
-        assert_eq!(normalize_for_tts("v1.2.3"), "v1.2.3");
-        assert_eq!(normalize_for_tts("50/50 split"), "50/50 split");
-        assert_eq!(normalize_for_tts("$50 and 100%"), "$50 and 100%");
-        // Three-digit tail is not a clock time.
-        assert_eq!(normalize_for_tts("ratio 1:000"), "ratio 1:000");
-        // Already-expanded text is idempotent.
-        assert_eq!(normalize_for_tts("3 30"), "3 30");
-    }
 }

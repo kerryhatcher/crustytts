@@ -1,3 +1,6 @@
+[workspace]
+members = ["crates/crustytts-lib"]
+
 [package]
 name = "crustytts"
 version = "0.1.0"
@@ -14,10 +17,11 @@ reqwest = { version = "0.12", features = ["blocking", "json"] }
 anyhow = "1"
 any-tts = { version = "0.1", features = ["kokoro", "download"] }
 fs2 = "0.4"
+crustytts-lib = { version = "0.1.0", path = "crates/crustytts-lib" }
 
 # Local fork of any-tts. Upstream's Kokoro backend ships a hand-rolled English
 # G2P with an 80-word dictionary that mispronounces most real text; the fork
-# routes English through a real eSpeak NG port instead. See
+# routes English through voice-g2p instead. See
 # vendor/any-tts/src/models/kokoro/espeak_compat.rs.
 [patch.crates-io]
 any-tts = { path = "vendor/any-tts" }
