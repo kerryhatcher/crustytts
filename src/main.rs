@@ -21,17 +21,20 @@
 ///   CRUSTYTTS_KOKORO_MODEL     Path to Kokoro model directory  (auto-detected from HF cache)
 
 use std::env;
+use std::fs::File;
 use std::io::{self, Read, Write};
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
 
 use anyhow::Context;
+use fs2::FileExt;
 use serde::Deserialize;
 
 // ── constants ──────────────────────────────────────────────────────────────────
 
 const OLLAMA_URL: &str = "http://localhost:11434/api/generate";
 const LOG_FILE: &str = "/tmp/claude-stop-tts.log";
+const SPEAKER_LOCK: &str = "/tmp/crustytts-speaker.lock";
 
 fn ollama_model() -> String {
     env::var("CLAUDE_TTS_LLM").unwrap_or_else(|_| "qwen3:8b".into())
@@ -313,7 +316,33 @@ fn summarize(context: &str) -> String {
 /// Uses the `any-tts` crate with Candle backend — no Python, no ONNX Runtime,
 /// no system dependencies beyond aplay for audio output. Falls back to espeak
 /// if the model isn't found or synthesis fails.
+/// Acquire an exclusive file lock at `/tmp/crustytts-speaker.lock`.
+///
+/// Uses `flock(LOCK_EX)` via the `fs2` crate — the kernel queues waiters, so
+/// contending processes block here until the current speaker finishes. The lock
+/// is released automatically when the returned `File` is dropped (speak() returns
+/// or the process exits/crashes). No stale-lock cleanup needed.
+fn acquire_speaker_lock() -> Option<File> {
+    match File::create(SPEAKER_LOCK) {
+        Ok(file) => {
+            if let Err(e) = file.lock_exclusive() {
+                log(&format!("speaker lock blocked: {e}"));
+                None
+            } else {
+                Some(file)
+            }
+        }
+        Err(e) => {
+            log(&format!("cannot create speaker lock: {e}"));
+            None
+        }
+    }
+}
+
 fn speak(text: &str) {
+    // Serialize audio output — multiple Claude Code sessions won't talk over each other
+    let _lock = acquire_speaker_lock();
+
     match speak_kokoro(text) {
         Ok(()) => return,
         Err(e) => log(&format!("kokoro failed ({e}), falling back to espeak")),
