@@ -52,7 +52,6 @@ dependencies = [
  "candle-core",
  "candle-nn",
  "candle-transformers",
- "espeak-ng",
  "hound",
  "kana2phone",
  "lindera",
@@ -69,6 +68,7 @@ dependencies = [
  "tokenizers",
  "tokio",
  "tracing",
+ "voice-g2p",
  "zip",
 ]
 
@@ -881,37 +881,6 @@ checksum = "d817e038c30374a4bcb22f94d0a8a0e216958d4c3dcde369b1439fec4bdda6e6"
 dependencies = [
  "cc",
 ]
-
-[[package]]
-name = "espeak-ng"
-version = "0.1.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "083cee3337773bfa7f1c38fe022dab392438ced57f3a64c883011952d13b83a1"
-dependencies = [
- "bitflags 2.13.1",
- "espeak-ng-data-dict-ru",
- "espeak-ng-data-dicts",
- "espeak-ng-data-phonemes",
- "thiserror 1.0.69",
-]
-
-[[package]]
-name = "espeak-ng-data-dict-ru"
-version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7b62f5cac7f103b5ef324f02b2fd883897404eac9766dd21d90864eeb633b7ff"
-
-[[package]]
-name = "espeak-ng-data-dicts"
-version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "393d19356251c91ffc4f08f446af2a5331efb6b6a5e7d109b26172bdea594eea"
-
-[[package]]
-name = "espeak-ng-data-phonemes"
-version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d65418fdbf64db690f177ae55b6cb0f01eec5ffd46f5e1cba6f841ae3f214ec0"
 
 [[package]]
 name = "fancy-regex"
@@ -3692,6 +3661,19 @@ name = "version_check"
 version = "0.9.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
+
+[[package]]
+name = "voice-g2p"
+version = "0.2.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8bbb1055aed015e0534b155cd50f1f15cf06f4648593b44f2c1e5d1e42c52962"
+dependencies = [
+ "fancy-regex 0.17.0",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "unicode-normalization",
+]
 
 [[package]]
 name = "walkdir"

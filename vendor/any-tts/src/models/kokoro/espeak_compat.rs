@@ -174,115 +174,25 @@ fn phonemize_english(text: &str, british: bool) -> ESpeakResult<String> {
 /// dictionary mangled ordinary words — "Claude" came out as `klæjuːd`
 /// ("ca-laa-due") rather than `klˈɔːd`.
 ///
-/// Three tiers, best first:
-///   1. The system `espeak-ng`/`espeak` binary. Only this tier has real
-///      dialect tables, so it is the only one that yields American vowels
-///      (`ɹɪfˈæktɚ`) to match Kokoro's American voices.
-///   2. The bundled pure-Rust eSpeak NG port. Correct words, but it ships
-///      only the base `en` phoneme table, so vowels lean British
-///      (`ɹᵻfˈæktə`). Needs no system packages.
-///   3. The original in-tree G2P — last resort, so synthesis degrades in
-///      quality rather than failing outright.
+/// US English goes through `voice-g2p`: Misaki's 90,201-entry dictionary plus
+/// an embedded POS tagger, so heteronyms resolve by grammatical role — "read"
+/// is `ɹˈɛd` in past tense but `ɹˈid` in future, a distinction eSpeak cannot
+/// make. Its output already uses Kokoro's native token alphabet (`eɪ` -> `A`,
+/// `ɾ` -> `T`), so no conversion is needed downstream.
+///
+/// `voice-g2p` ships US data only. British English keeps the original in-tree
+/// G2P, which is weak but dialect-correct; US is what Kokoro's `af_*` voices
+/// need. The same fallback covers the unlikely case of a G2P error, so
+/// synthesis degrades in quality rather than failing outright.
 fn phonemize_english_clause(text: &str, british: bool) -> ESpeakResult<String> {
-    if let Some(phonemes) = system_espeak_phonemes(text, british) {
-        return Ok(phonemes);
+    if british {
+        return Ok(english_g2p::phonemize_clause(text, true));
     }
 
-    let phonemes = espeak_engine(british)
-        .and_then(|engine| engine.lock().ok()?.text_to_phonemes(text).ok());
-
-    Ok(phonemes.unwrap_or_else(|| english_g2p::phonemize_clause(text, british)))
-}
-
-/// Phonemize via the system eSpeak binary, if one is installed.
-///
-/// Returns `None` when no binary is present or it produced nothing usable,
-/// letting the caller fall through to the bundled engine.
-fn system_espeak_phonemes(text: &str, british: bool) -> Option<String> {
-    let bin = system_espeak_binary()?;
-    let voice = if british { "en-gb" } else { "en-us" };
-
-    let output = std::process::Command::new(bin)
-        .args(["-q", "--ipa", "-v", voice, "--", text])
-        .output()
-        .ok()?;
-
-    if !output.status.success() {
-        return None;
-    }
-
-    // espeak emits a leading space and a trailing newline per clause.
-    let phonemes = String::from_utf8(output.stdout).ok()?.trim().to_string();
-    (!phonemes.is_empty()).then_some(phonemes)
-}
-
-/// Locate a usable system eSpeak binary, preferring `espeak-ng` over `espeak`.
-///
-/// Probed once — a missing binary is cached as `None` so we don't re-spawn a
-/// doomed process for every clause.
-fn system_espeak_binary() -> Option<&'static str> {
-    static BIN: OnceLock<Option<&'static str>> = OnceLock::new();
-
-    *BIN.get_or_init(|| {
-        ["espeak-ng", "espeak"].into_iter().find(|bin| {
-            std::process::Command::new(bin)
-                .arg("--version")
-                .stdout(std::process::Stdio::null())
-                .stderr(std::process::Stdio::null())
-                .status()
-                .is_ok_and(|status| status.success())
-        })
-    })
-}
-
-/// Lazily-built eSpeak NG engines, one per English dialect.
-///
-/// Engine construction extracts the bundled data files to disk and parses the
-/// dictionary, so it is done once per dialect and cached for the process
-/// lifetime. `Mutex` because `EspeakNg` is not `Sync`.
-fn espeak_engine(british: bool) -> Option<&'static Mutex<espeak_ng::EspeakNg>> {
-    static US: OnceLock<Option<Mutex<espeak_ng::EspeakNg>>> = OnceLock::new();
-    static GB: OnceLock<Option<Mutex<espeak_ng::EspeakNg>>> = OnceLock::new();
-
-    let cell = if british { &GB } else { &US };
-    let lang = if british { "en-gb" } else { "en-us" };
-
-    cell.get_or_init(|| build_espeak_engine(lang).map(Mutex::new))
-        .as_ref()
-}
-
-/// Extract the compile-time-embedded eSpeak NG data and open an engine for `lang`.
-fn build_espeak_engine(lang: &str) -> Option<espeak_ng::EspeakNg> {
-    let data_dir = espeak_data_dir()?;
-    espeak_ng::EspeakNg::with_data_dir(lang, data_dir).ok()
-}
-
-/// Install the bundled eSpeak NG data files once, returning the directory.
-///
-/// The data is embedded in the binary at compile time; it has to live on disk
-/// for the engine to read it. Honors `CRUSTYTTS_ESPEAK_DATA` so the location
-/// can be pinned on systems where the default cache path is unwritable.
-fn espeak_data_dir() -> Option<&'static std::path::Path> {
-    static DIR: OnceLock<Option<std::path::PathBuf>> = OnceLock::new();
-
-    DIR.get_or_init(|| {
-        let dir = match std::env::var_os("CRUSTYTTS_ESPEAK_DATA") {
-            Some(path) => std::path::PathBuf::from(path),
-            None => espeak_default_data_dir()?,
-        };
-        std::fs::create_dir_all(&dir).ok()?;
-        espeak_ng::install_bundled_data(&dir).ok()?;
-        Some(dir)
-    })
-    .as_deref()
-}
-
-fn espeak_default_data_dir() -> Option<std::path::PathBuf> {
-    let base = match std::env::var_os("XDG_CACHE_HOME") {
-        Some(cache) => std::path::PathBuf::from(cache),
-        None => std::path::PathBuf::from(std::env::var_os("HOME")?).join(".cache"),
-    };
-    Some(base.join("crustytts/espeak-ng-data"))
+    Ok(voice_g2p::english_to_phonemes(text)
+        .ok()
+        .filter(|phonemes| !phonemes.trim().is_empty())
+        .unwrap_or_else(|| english_g2p::phonemize_clause(text, false)))
 }
 
 #[cfg(test)]

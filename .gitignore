@@ -1,2 +1,3 @@
 /target
 vendor/*/target
+vendor/*/.cargo-ok

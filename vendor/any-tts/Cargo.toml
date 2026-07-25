@@ -165,12 +165,17 @@ path = "tests/test_traits.rs"
 [dependencies.base64]
 version = "0.22"
 
-# crustytts patch: real eSpeak NG G2P (pure Rust, data embedded at compile time).
-# Replaces the in-tree hand-rolled english_g2p, whose 80-word dictionary
-# mispronounced most real text ("Claude" -> klæjuːd instead of klˈɔːd).
-[dependencies.espeak-ng]
-version = "0.1.2"
-features = ["bundled-data"]
+# crustytts patch: real English G2P, replacing the in-tree hand-rolled
+# english_g2p whose 80-word dictionary mispronounced most real text
+# ("Claude" -> klæjuːd instead of klˈɔːd).
+#
+# voice-g2p bundles Misaki's 90,201-entry US dictionary plus an embedded
+# averaged-perceptron POS tagger, so it disambiguates heteronyms by
+# grammatical role ("read" past vs future) — which eSpeak cannot do. It emits
+# Kokoro's native token alphabet directly and spawns no subprocesses.
+# MIT-licensed, unlike the GPL-3.0 espeak-ng crate this replaces.
+[dependencies.voice-g2p]
+version = "0.2.2"
 
 [dependencies.candle-core]
 version = "0.10.2"
