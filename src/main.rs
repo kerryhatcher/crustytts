@@ -373,19 +373,12 @@ fn acquire_speaker_lock() -> Option<File> {
 /// Synthesize and play `text`.
 ///
 /// Runs through `crustytts-lib` end to end — no Python, no system TTS
-/// packages, nothing beyond `aplay` for output. If that fails (missing model,
-/// inference error), falls back to the system `espeak` binary: a far worse
-/// robotic voice with no dictionary, but better than silent failure. That path
-/// needs `espeak` installed and is unreachable when Kokoro is working.
+/// packages, nothing beyond `aplay` for output.
 fn speak(text: &str) {
     // Serialize audio output — multiple Claude Code sessions won't talk over each other
     let _lock = acquire_speaker_lock();
 
-    match speak_kokoro(text) {
-        Ok(()) => return,
-        Err(e) => log(&format!("kokoro failed ({e}), falling back to espeak")),
-    }
-    if let Err(e) = speak_espeak(text) {
+    if let Err(e) = speak_kokoro(text) {
         log(&format!("speak() failed: {e}"));
     }
 }
@@ -427,42 +420,6 @@ fn speak_kokoro(text: &str) -> anyhow::Result<()> {
     ));
 
     AplaySink::new().play(&audio)?;
-    Ok(())
-}
-
-/// Speak `text` using espeak-ng (or espeak fallback) → aplay pipeline.
-fn speak_espeak(text: &str) -> anyhow::Result<()> {
-    // Try espeak-ng first, fall back to espeak (older Ubuntu packages)
-    let bin = if Command::new("espeak-ng")
-        .arg("--version")
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status()
-        .is_ok()
-    {
-        "espeak-ng"
-    } else {
-        "espeak"
-    };
-
-    let mut tts = Command::new(bin)
-        .args(["--stdout"])
-        .arg(text)
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .spawn()
-        .with_context(|| format!("failed to spawn {bin}"))?;
-
-    let tts_stdout = tts.stdout.take().with_context(|| format!("{bin} has no stdout"))?;
-
-    let mut aplay = Command::new("aplay")
-        .stdin(tts_stdout)
-        .stderr(Stdio::null())
-        .stdout(Stdio::null())
-        .spawn()
-        .context("failed to spawn aplay")?;
-
-    aplay.wait().context("aplay failed")?;
     Ok(())
 }
 
