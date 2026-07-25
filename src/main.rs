@@ -4,8 +4,9 @@
 /// session transcript, asks a local Ollama model for a short summary, then
 /// synthesizes and plays it with Kokoro TTS (82M-parameter neural model).
 ///
-/// Fully self-contained Rust binary — no Python, no ONNX Runtime system
-/// dependencies. Uses the `any-tts` crate with Candle (pure Rust ML) backend.
+/// Fully self-contained Rust binary — no Python, no system TTS packages.
+/// Synthesis runs through `crustytts-lib`: text -> phonemes -> tokens -> ONNX
+/// Kokoro -> audio, with ONNX Runtime statically linked.
 ///
 /// Architecture: the binary uses a self-spawning pattern. The first invocation
 /// reads stdin, writes Claude Code's expected control JSON, spawns a detached
@@ -15,18 +16,17 @@
 /// Hook registration — in ~/.claude/settings.json "Stop" array:
 ///     {"type": "command", "command": "crustytts"}
 ///
-/// Pronunciation: upstream `any-tts` ships a hand-rolled English G2P with an
-/// 80-word dictionary that mangles ordinary text ("Claude" -> `klæjuːd`, heard
-/// as "ca-laa-due"). `vendor/any-tts` patches US English to use `voice-g2p`,
-/// which bundles Misaki's 90,201-entry dictionary and a POS tagger — so
-/// heteronyms resolve by grammatical role ("I read it yesterday" -> `ɹˈɛd`,
-/// "I will read it" -> `ɹˈid`), which eSpeak gets wrong. No system packages,
-/// no subprocesses, and MIT-licensed.
+/// Pronunciation is handled by `crustytts-lib`, which pairs Misaki's
+/// 90k-entry dictionary with a POS tagger — so heteronyms resolve by
+/// grammatical role ("I read it yesterday" -> `ɹˈɛd`, "I will read it" ->
+/// `ɹˈid`) — and spells out any word the dictionary lacks rather than
+/// dropping it silently.
 ///
 /// Environment variables:
 ///   CLAUDE_TTS_LLM             Ollama model for summarization  (default: qwen3:8b)
 ///   CLAUDE_TTS_VOICE           Kokoro voice id                 (default: af_heart)
-///   CRUSTYTTS_KOKORO_MODEL     Path to Kokoro model directory  (auto-detected from HF cache)
+///   CRUSTYTTS_ONNX_MODEL       Path to Kokoro .onnx file       (auto-detected from HF cache)
+///   CRUSTYTTS_VOICE            Path to a voice .bin file       (auto-detected from HF cache)
 
 use std::env;
 use std::fs::File;
@@ -52,27 +52,55 @@ fn kokoro_voice() -> String {
     env::var("CLAUDE_TTS_VOICE").unwrap_or_else(|_| "af_heart".into())
 }
 
-/// Locate the Kokoro model directory (containing config.json + model weights).
-fn kokoro_model_dir() -> Option<PathBuf> {
-    if let Ok(p) = env::var("CRUSTYTTS_KOKORO_MODEL") {
+/// Locate the Kokoro ONNX model file.
+fn kokoro_model_path() -> Option<PathBuf> {
+    if let Ok(p) = env::var("CRUSTYTTS_ONNX_MODEL") {
         let path = PathBuf::from(&p);
-        if path.is_dir() {
+        if path.is_file() {
             return Some(path);
         }
     }
-    // Search HF cache for the Kokoro model
-    for hf_base in hf_cache_dirs() {
-        let snapshots = hf_base.join("hub/models--hexgrad--Kokoro-82M/snapshots");
-        if let Ok(entries) = std::fs::read_dir(&snapshots) {
-            for entry in entries.flatten() {
-                let config = entry.path().join("config.json");
-                if config.exists() {
-                    return Some(entry.path());
-                }
+    // Prefer the quantized build: a third the size, no audible difference for
+    // a one-sentence notification.
+    for snapshot in onnx_snapshots() {
+        for name in ["model_q8f16.onnx", "model.onnx", "model_quantized.onnx"] {
+            let candidate = snapshot.join("onnx").join(name);
+            if candidate.is_file() {
+                return Some(candidate);
             }
         }
     }
     None
+}
+
+/// Locate the voice embedding for [`kokoro_voice`].
+fn kokoro_voice_path() -> Option<PathBuf> {
+    if let Ok(p) = env::var("CRUSTYTTS_VOICE") {
+        let path = PathBuf::from(&p);
+        if path.is_file() {
+            return Some(path);
+        }
+    }
+    let file = format!("{}.bin", kokoro_voice());
+    for snapshot in onnx_snapshots() {
+        let candidate = snapshot.join("voices").join(&file);
+        if candidate.is_file() {
+            return Some(candidate);
+        }
+    }
+    None
+}
+
+/// Snapshot directories of the Kokoro ONNX repo in the HuggingFace cache.
+fn onnx_snapshots() -> Vec<PathBuf> {
+    let mut found = Vec::new();
+    for hf_base in hf_cache_dirs() {
+        let snapshots = hf_base.join("hub/models--onnx-community--Kokoro-82M-v1.0-ONNX/snapshots");
+        if let Ok(entries) = std::fs::read_dir(&snapshots) {
+            found.extend(entries.flatten().map(|e| e.path()).filter(|p| p.is_dir()));
+        }
+    }
+    found
 }
 
 fn hf_cache_dirs() -> Vec<PathBuf> {
@@ -319,11 +347,6 @@ fn summarize(context: &str) -> String {
 
 // ── TTS ─────────────────────────────────────────────────────────────────────────
 
-/// Synthesize and play `text` using Kokoro TTS (82M neural model, pure Rust).
-///
-/// Uses the `any-tts` crate with Candle backend — no Python, no ONNX Runtime,
-/// no system dependencies beyond aplay for audio output. Falls back to espeak
-/// if the model isn't found or synthesis fails.
 /// Acquire an exclusive file lock at `/tmp/crustytts-speaker.lock`.
 ///
 /// Uses `flock(LOCK_EX)` via the `fs2` crate — the kernel queues waiters, so
@@ -347,13 +370,16 @@ fn acquire_speaker_lock() -> Option<File> {
     }
 }
 
+/// Synthesize and play `text`.
+///
+/// Runs through `crustytts-lib` end to end — no Python, no system TTS
+/// packages, nothing beyond `aplay` for output. If that fails (missing model,
+/// inference error), falls back to the system `espeak` binary: a far worse
+/// robotic voice with no dictionary, but better than silent failure. That path
+/// needs `espeak` installed and is unreachable when Kokoro is working.
 fn speak(text: &str) {
     // Serialize audio output — multiple Claude Code sessions won't talk over each other
     let _lock = acquire_speaker_lock();
-
-    // Normalize here, not deeper in the stack: any-tts splits clauses on ':'
-    // before G2P runs, which is what tears "3:30" apart in the first place.
-    let text = &crustytts_lib::normalize(text);
 
     match speak_kokoro(text) {
         Ok(()) => return,
@@ -364,56 +390,43 @@ fn speak(text: &str) {
     }
 }
 
-/// Synthesize with any-tts Kokoro (Candle backend) → aplay.
+/// Synthesize with Kokoro via crustytts-lib: text → phonemes → tokens → audio.
 fn speak_kokoro(text: &str) -> anyhow::Result<()> {
-    use any_tts::{ModelType, SynthesisRequest, TtsConfig};
+    use crustytts_lib::{
+        kokoro::KokoroOnnx, sink::AplaySink, AudioSink, KokoroTokenizer, Synthesizer, Tokenizer,
+    };
 
-    let model_dir = kokoro_model_dir()
-        .context("Kokoro model not found — set CRUSTYTTS_KOKORO_MODEL or download hexgrad/Kokoro-82M")?;
-    let voice = kokoro_voice();
+    let model_path = kokoro_model_path().context(
+        "Kokoro ONNX model not found — set CRUSTYTTS_ONNX_MODEL or download \
+         onnx-community/Kokoro-82M-v1.0-ONNX",
+    )?;
+    let voice_path = kokoro_voice_path().with_context(|| {
+        format!(
+            "voice '{}' not found — set CRUSTYTTS_VOICE to a .bin file",
+            kokoro_voice()
+        )
+    })?;
 
-    log(&format!(
-        "  kokoro model: {} | voice: {voice}",
-        model_dir.display()
-    ));
-
-    let config = TtsConfig::new(ModelType::Kokoro)
-        .with_model_path(model_dir.to_string_lossy());
-    let model = any_tts::load_model(config)
-        .context("failed to load Kokoro model")?;
-
-    let sample_rate = model.sample_rate();
-    let request = SynthesisRequest::new(text).with_language("en");
-    let audio = model.synthesize(&request).context("kokoro synthesis failed")?;
-
-    log(&format!(
-        "  kokoro synth: {} samples at {sample_rate} Hz",
-        audio.samples.len()
-    ));
-
-    // Convert f32 samples to little-endian bytes for aplay
-    let raw: Vec<u8> = audio
-        .samples
-        .iter()
-        .flat_map(|s| s.to_le_bytes())
-        .collect();
-
-    let rate_str = sample_rate.to_string();
-    let mut aplay = Command::new("aplay")
-        .args(["-r", &rate_str, "-f", "FLOAT_LE", "-t", "raw", "-c", "1"])
-        .stdin(Stdio::piped())
-        .stderr(Stdio::null())
-        .stdout(Stdio::null())
-        .spawn()
-        .context("failed to spawn aplay")?;
-
-    if let Some(mut stdin) = aplay.stdin.take() {
-        stdin
-            .write_all(&raw)
-            .context("failed to write audio to aplay")?;
+    let outcome = crustytts_lib::phonemize(text);
+    log(&format!("  phonemes: {}", outcome.phonemes));
+    if !outcome.spelled_out.is_empty() {
+        // Not an error — these were spelled out rather than dropped. Logged so
+        // the words worth adding to a dictionary are visible.
+        log(&format!("  spelled out: {:?}", outcome.spelled_out));
     }
 
-    aplay.wait().context("aplay failed")?;
+    let tokens = KokoroTokenizer.encode(&outcome.phonemes);
+    let voice = crustytts_lib::load_voice(&voice_path)?;
+    let audio = KokoroOnnx::load(&model_path)?.synthesize(&tokens, &voice)?;
+
+    log(&format!(
+        "  synth: {} samples at {} Hz ({:.2}s)",
+        audio.samples.len(),
+        audio.sample_rate,
+        audio.duration_secs()
+    ));
+
+    AplaySink::new().play(&audio)?;
     Ok(())
 }
 
