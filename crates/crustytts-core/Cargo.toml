@@ -1,0 +1,11 @@
+[package]
+name = "crustytts-core"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "Shared types and traits for the crustytts TTS pipeline: Audio, Voice, Error, and the stage traits (Phonemizer, Normalizer, Tokenizer, Synthesizer, AudioSink)."
+keywords = ["tts", "g2p", "phoneme", "kokoro", "speech"]
+categories = ["text-processing", "multimedia::audio"]
+repository = "https://github.com/kerryhatcher/crustytts"
+
+[dependencies]

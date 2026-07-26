@@ -1,0 +1,12 @@
+[package]
+name = "crustytts-codespell"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "Codespell dictionary integration: direct typo→correction lookup for TTS proofreading"
+keywords = ["tts", "spellcheck", "codespell", "typo", "text-processing"]
+categories = ["text-processing"]
+repository = "https://github.com/kerryhatcher/crustytts"
+
+[dependencies]
+crustytts-core = { version = "0.1.0", path = "../crustytts-core" }

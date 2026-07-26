@@ -1,0 +1,12 @@
+[package]
+name = "crustytts-chatspeak"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "Chat-speak abbreviation expansion and acronym capitalization for TTS proofreading"
+keywords = ["tts", "chatspeak", "abbreviation", "normalization", "text-processing"]
+categories = ["text-processing"]
+repository = "https://github.com/kerryhatcher/crustytts"
+
+[dependencies]
+crustytts-core = { version = "0.1.0", path = "../crustytts-core" }

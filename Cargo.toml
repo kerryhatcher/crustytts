@@ -1,5 +1,19 @@
 [workspace]
-members = ["crates/crustytts-lib"]
+members = [
+    "crates/crustytts-core",
+    "crates/crustytts-normalize",
+    "crates/crustytts-phonemize",
+    "crates/crustytts-tokenizer",
+    "crates/crustytts-kokoro",
+    "crates/crustytts-sink",
+    "crates/crustytts-voice",
+    "crates/crustytts-summarize",
+    "crates/crustytts-spellcheck",
+    "crates/crustytts-chatspeak",
+    "crates/crustytts-sentence",
+    "crates/crustytts-gec",
+    "crates/crustytts-codespell",
+]
 
 [package]
 name = "crustytts"
@@ -10,10 +24,25 @@ edition = "2021"
 name = "crustytts"
 path = "src/main.rs"
 
+[[example]]
+name = "speak"
+path = "examples/speak.rs"
+
 [dependencies]
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-reqwest = { version = "0.12", features = ["blocking", "json"] }
 anyhow = "1"
 fs2 = "0.4"
-crustytts-lib = { version = "0.1.0", path = "crates/crustytts-lib", features = ["full"] }
+crustytts-core = { version = "0.1.0", path = "crates/crustytts-core" }
+crustytts-normalize = { version = "0.1.0", path = "crates/crustytts-normalize" }
+crustytts-phonemize = { version = "0.1.0", path = "crates/crustytts-phonemize", features = ["oov-llm"] }
+crustytts-tokenizer = { version = "0.1.0", path = "crates/crustytts-tokenizer" }
+crustytts-kokoro = { version = "0.1.0", path = "crates/crustytts-kokoro" }
+crustytts-sink = { version = "0.1.0", path = "crates/crustytts-sink" }
+crustytts-voice = { version = "0.1.0", path = "crates/crustytts-voice" }
+crustytts-summarize = { version = "0.1.0", path = "crates/crustytts-summarize" }
+crustytts-spellcheck = { version = "0.1.0", path = "crates/crustytts-spellcheck" }
+crustytts-chatspeak = { version = "0.1.0", path = "crates/crustytts-chatspeak" }
+crustytts-sentence = { version = "0.1.0", path = "crates/crustytts-sentence" }
+crustytts-gec = { version = "0.1.0", path = "crates/crustytts-gec" }
+crustytts-codespell = { version = "0.1.0", path = "crates/crustytts-codespell" }
