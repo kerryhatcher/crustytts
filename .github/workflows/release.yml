@@ -1,0 +1,123 @@
+# Builds crustytts binaries for Linux (x86_64), Windows (x86_64), and macOS (Apple Silicon)
+# and publishes them to a GitHub Release on tag push.
+#
+# Trigger: git tag v*
+# Output: three archive assets per release
+
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+env:
+  CARGO_TERM_COLOR: always
+  # Workaround for ort crate downloading ONNX Runtime prebuilts
+  ORT_STRATEGY: download
+
+jobs:
+  build:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      matrix:
+        include:
+          - name: Linux x86_64
+            runner: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            archive: tar.gz
+            strip: true
+
+          - name: macOS Apple Silicon
+            runner: macos-latest
+            target: aarch64-apple-darwin
+            archive: tar.gz
+            strip: true
+
+          - name: Windows x86_64
+            runner: windows-latest
+            target: x86_64-pc-windows-msvc
+            archive: zip
+            strip: false
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          target: ${{ matrix.target }}
+
+      - name: Build (release)
+        run: cargo build --release --target ${{ matrix.target }}
+        shell: bash
+
+      - name: Strip binary (Linux/macOS)
+        if: matrix.strip
+        run: |
+          binary="target/${{ matrix.target }}/release/crustytts"
+          if [ -f "$binary" ]; then
+            strip "$binary"
+            echo "Stripped $binary"
+          fi
+        shell: bash
+
+      - name: Package (tar.gz)
+        if: matrix.archive == 'tar.gz'
+        run: |
+          cd target/${{ matrix.target }}/release
+          tar czf ../../../crustytts-${{ matrix.target }}.tar.gz \
+            crustytts \
+            ../../../README.md \
+            ../../../LICENSE
+        shell: bash
+
+      - name: Package (zip)
+        if: matrix.archive == 'zip'
+        run: |
+          cd target/${{ matrix.target }}/release
+          7z a ../../../crustytts-${{ matrix.target }}.zip \
+            crustytts.exe \
+            ../../../README.md \
+            ../../../LICENSE
+        shell: bash
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: crustytts-${{ matrix.target }}
+          path: crustytts-${{ matrix.target }}.${{ matrix.archive }}
+          if-no-files-found: error
+
+  release:
+    name: Publish release
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout (for README + LICENSE in release body)
+        uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: List artifacts
+        run: ls -lh dist/
+        shell: bash
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: ${{ github.ref_name }}
+          body_path: .github/release-body.md
+          fail_on_unmatched_files: true
+          files: dist/*
+          generate_release_notes: true
