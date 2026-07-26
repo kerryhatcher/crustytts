@@ -1,15 +1,18 @@
-//! Phonemes to Kokoro token ids.
+//! Kokoro-82M phoneme-to-token-id mapping.
+//!
+//! The vocabulary (114 entries) is embedded at compile time. Boundary tokens
+//! wrap every sequence — Kokoro is trained with them and produces noticeably
+//! worse prosody without them.
 
 use std::collections::HashMap;
 use std::sync::OnceLock;
 
-use crate::traits::Tokenizer;
+use crustytts_core::Tokenizer;
 
 /// Kokoro's phoneme vocabulary, embedded at compile time (114 entries, <1 KB).
 const VOCAB_JSON: &str = include_str!("kokoro_vocab.json");
 
-/// Boundary token wrapping every sequence. Kokoro is trained with it and
-/// produces noticeably worse prosody without it.
+/// Boundary token wrapping every sequence.
 const BOUNDARY: i64 = 0;
 
 fn vocab() -> &'static HashMap<String, i64> {
@@ -69,8 +72,6 @@ mod tests {
         assert!(ids.len() > 2, "expected real tokens between boundaries");
     }
 
-    /// Kokoro's compact diphthong tokens are ASCII capitals, which look like
-    /// stray letters but are genuine vocabulary entries.
     #[test]
     fn encodes_kokoro_compact_tokens() {
         for (token, expected) in [("A", 24), ("I", 25), ("O", 31), ("T", 36), ("W", 39)] {
@@ -81,7 +82,6 @@ mod tests {
 
     #[test]
     fn skips_characters_outside_the_vocabulary() {
-        // A tab has no phoneme meaning and must not become a token.
         let ids = KokoroTokenizer.encode("k\tl");
         assert_eq!(ids.len(), 4, "boundaries plus two real tokens");
     }
@@ -90,15 +90,5 @@ mod tests {
     fn reports_unknown_characters_for_debugging() {
         assert!(KokoroTokenizer.unknown_chars("klˈɔd").is_empty());
         assert_eq!(KokoroTokenizer.unknown_chars("k\tl"), vec!['\t']);
-    }
-
-    /// Guards the phonemizer/tokenizer contract: everything the bundled
-    /// phonemizer emits must survive tokenization.
-    #[cfg(feature = "phonemize")]
-    #[test]
-    fn bundled_phonemizer_output_is_fully_encodable() {
-        let out = crate::phonemize("Claude committed the refactor at 1:00");
-        let unknown = KokoroTokenizer.unknown_chars(&out.phonemes);
-        assert!(unknown.is_empty(), "unencodable output: {unknown:?}");
     }
 }

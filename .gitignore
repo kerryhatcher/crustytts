@@ -1,3 +1,4 @@
 /target
 vendor/*/target
 vendor/*/.cargo-ok
+.pi-subagents/

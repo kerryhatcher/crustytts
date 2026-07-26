@@ -139,16 +139,19 @@ struct HookPayload {
 
 /// A single entry from the JSONL transcript. Fields are optional because the
 /// format varies: sometimes `type`/`message` wrapper, sometimes bare `role`/`content`.
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize, Debug, Clone)]
 struct TranscriptEntry {
     #[serde(rename = "type")]
     entry_type: Option<String>,
     role: Option<String>,
     message: Option<MessageBlock>,
     content: Option<serde_json::Value>,
+    /// CherryPi unified-log field — identifies the working directory for this session.
+    #[serde(default)]
+    cwd: Option<String>,
 }
 
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize, Debug, Clone)]
 struct MessageBlock {
     role: Option<String>,
     content: Option<serde_json::Value>,
@@ -215,6 +218,23 @@ fn text_from_entry(entry: &TranscriptEntry) -> String {
     String::new()
 }
 
+/// Filter transcript entries by `cwd` (CherryPi unified-log field).
+///
+/// CherryPi writes all sessions to a single `chat.jsonl`, keyed by `cwd`.
+/// Returns only entries whose `cwd` matches the given path. When `cwd` is
+/// `None`, all entries are returned (Claude Code behavior — one transcript
+/// per file).
+fn filter_by_cwd(entries: Vec<TranscriptEntry>, cwd: Option<&str>) -> Vec<TranscriptEntry> {
+    let cwd = match cwd {
+        Some(c) if !c.is_empty() => c,
+        _ => return entries,
+    };
+    entries
+        .into_iter()
+        .filter(|e| e.cwd.as_deref() == Some(cwd))
+        .collect()
+}
+
 /// Collect recent exchanges into a compact string for the summarizer.
 fn build_context(entries: &[TranscriptEntry], max_chars: usize) -> String {
     let mut segments: Vec<String> = Vec::new();
@@ -234,7 +254,7 @@ fn build_context(entries: &[TranscriptEntry], max_chars: usize) -> String {
         match role {
             Some("assistant" | "ai") => {
                 let truncated: String = text.chars().take(700).collect();
-                segments.push(format!("[Claude]: {truncated}"));
+                segments.push(format!("[Assistant]: {truncated}"));
             }
             Some("user" | "human") => {
                 if !text.starts_with('<') {
@@ -264,10 +284,10 @@ fn build_context(entries: &[TranscriptEntry], max_chars: usize) -> String {
 
 fn build_summary_prompt(context: &str) -> String {
     format!(
-        "You are a text-to-speech notification. Claude Code just stopped working \
+        "You are a text-to-speech notification. An AI coding agent just stopped working \
          and is waiting for user input.\n\n\
          Write ONE sentence, strictly under 20 words, describing the single most \
-         recent thing Claude did. Start with 'Claude'. Past tense. No filler, no \
+         recent thing the agent did. Past tense. No filler, no \
          preamble — the sentence is the entire response.\n\n\
          Session (most recent last):\n{context}\n\n\
          Respond with the sentence only."
@@ -278,10 +298,10 @@ fn build_summary_prompt(context: &str) -> String {
 fn naive_fallback(context: &str) -> String {
     for line in context.lines().rev() {
         let line = line.trim();
-        if !line.starts_with("[Claude]:") {
+        if !line.starts_with("[Assistant]:") {
             continue;
         }
-        let text = &line["[Claude]:".len()..].trim();
+        let text = &line["[Assistant]:".len()..].trim();
         // Skip XML, code fences, and markdown artifacts
         if text.starts_with('<')
             || text.starts_with("```")
@@ -302,13 +322,13 @@ fn naive_fallback(context: &str) -> String {
             return text.chars().take(120).collect();
         }
     }
-    "Claude has finished and is waiting for your input.".into()
+    "The agent has finished and is waiting for your input.".into()
 }
 
 fn summarize(context: &str) -> String {
     if context.trim().is_empty() {
         log("summarize: context was empty");
-        return "Claude is ready and waiting for your next instruction.".into();
+        return "The agent is ready and waiting for your next instruction.".into();
     }
 
     let prompt = build_summary_prompt(context);
@@ -615,6 +635,85 @@ fn proof_test(text: &str) {
     println!("{final_output}");
 }
 
+// ── CherryPi context (from stdin_context in hooks) ─────────────────────────────
+
+/// JSON payload CherryPi pipes to stdin when a hook has `stdin_context: true`.
+#[derive(Deserialize)]
+struct CherryPiContext {
+    workspace: Option<CherryPiWorkspace>,
+    #[allow(dead_code)]
+    session_id: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct CherryPiWorkspace {
+    current_dir: Option<String>,
+}
+
+/// Locate the CherryPi chat log by platform convention.
+fn cherrypi_log_path() -> Option<String> {
+    // Check XDG_DATA_HOME first
+    if let Ok(data_home) = env::var("XDG_DATA_HOME") {
+        let path = std::path::Path::new(&data_home).join("cherrypi/logs/chat.jsonl");
+        if path.is_file() {
+            return Some(path.to_string_lossy().into());
+        }
+    }
+    // Fallback: $HOME/.local/share/cherrypi/logs/chat.jsonl (Linux)
+    if let Ok(home) = env::var("HOME") {
+        let path = std::path::Path::new(&home)
+            .join(".local/share/cherrypi/logs/chat.jsonl");
+        if path.is_file() {
+            return Some(path.to_string_lossy().into());
+        }
+        // macOS fallback
+        let mac_path = std::path::Path::new(&home)
+            .join("Library/Application Support/cherrypi/logs/chat.jsonl");
+        if mac_path.is_file() {
+            return Some(mac_path.to_string_lossy().into());
+        }
+    }
+    None
+}
+
+/// Handle a CherryPi hook invocation: read unified log, filter by workspace, speak.
+fn handle_cherrypi_hook(current_dir: &str) {
+    let log_path = match cherrypi_log_path() {
+        Some(p) => p,
+        None => {
+            log("cherrypi: cannot locate chat.jsonl — skipping");
+            return;
+        }
+    };
+
+    let mut entries = load_jsonl(&log_path);
+    let before = entries.len();
+    entries = filter_by_cwd(entries, Some(current_dir));
+    log(&format!(
+        "cherrypi: loaded {} raw, filtered {} -> {} by cwd={}",
+        before,
+        before,
+        entries.len(),
+        current_dir
+    ));
+
+    if entries.is_empty() {
+        log("cherrypi: no entries match cwd — skipping");
+        return;
+    }
+
+    let context = build_context(&entries, 3000);
+    log(&format!(
+        "  context chars: {} | preview: {:.120?}",
+        context.len(),
+        context
+    ));
+
+    let text = summarize(&context);
+    log(&format!("  speaking: {text:?}"));
+    speak(&text);
+}
+
 // ── background work ─────────────────────────────────────────────────────────────
 
 fn background_work(transcript_path: &str) {
@@ -778,35 +877,95 @@ fn main() -> anyhow::Result<()> {
         return Ok(());
     }
 
-    // ── foreground mode ──────────────────────────────────────────────────────
-    let mut raw = String::new();
-    io::stdin().read_to_string(&mut raw)?;
+    // ── transcript mode (read + summarize + speak any JSONL transcript) ─────
+    // Usage: crustytts --transcript <path> [--cwd <path>]
+    // Supports any JSONL transcript format (Claude Code, CherryPi, etc.).
+    // When --cwd is provided, entries are filtered by CherryPi's cwd field.
+    if args.len() >= 3 && args[1] == "--transcript" {
+        let path = &args[2];
+        let cwd = if args.len() >= 5 && args[3] == "--cwd" {
+            Some(args[4].clone())
+        } else {
+            // Default to PWD when no explicit cwd is given
+            env::var("PWD").ok().filter(|s| !s.is_empty())
+        };
 
-    let payload: HookPayload = serde_json::from_str(&raw).unwrap_or(HookPayload {
-        transcript_path: None,
-    });
+        let mut entries = load_jsonl(path);
+        log(&format!(
+            "transcript: loaded {} raw entries from {}",
+            entries.len(),
+            path
+        ));
 
-    let transcript_path = payload.transcript_path.unwrap_or_default();
+        if let Some(ref cwd_val) = cwd {
+            let before = entries.len();
+            entries = filter_by_cwd(entries, Some(cwd_val));
+            log(&format!(
+                "transcript: filtered {} -> {} entries by cwd={}",
+                before,
+                entries.len(),
+                cwd_val
+            ));
+        }
 
-    // Skip background/observer sessions (claude-mem, subagent summarizers, etc.)
-    if transcript_path.contains("observer-session") {
-        println!("{{\"continue\": true, \"suppressOutput\": true}}");
+        let context = build_context(&entries, 3000);
+        log(&format!(
+            "  context chars: {} | preview: {:.120?}",
+            context.len(),
+            context
+        ));
+
+        let text = summarize(&context);
+        log(&format!("  speaking: {text:?}"));
+        speak(&text);
         return Ok(());
     }
 
-    // Spawn detached child for heavy work
-    let exe = env::current_exe().context("cannot determine own executable path")?;
-    let _child = Command::new(exe)
-        .arg("--background")
-        .arg(&transcript_path)
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()
-        .context("failed to spawn background child")?;
-    // Don't wait — child runs independently
+    // ── foreground mode ──────────────────────────────────────────────────────
+    let mut raw = String::new();
+    io::stdin().read_to_string(&mut raw)?;
+    let raw = raw.trim();
 
-    // Signal Claude Code and exit (non-blocking)
-    println!("{{\"continue\": true, \"suppressOutput\": true}}");
+    // Try Claude Code protocol first: stdin has {"transcript_path": "..."}
+    if let Ok(payload) = serde_json::from_str::<HookPayload>(raw) {
+        if let Some(ref transcript_path) = payload.transcript_path {
+            if !transcript_path.is_empty() {
+                // Skip background/observer sessions (claude-mem, subagent summarizers)
+                if transcript_path.contains("observer-session") {
+                    println!("{{\"continue\": true, \"suppressOutput\": true}}");
+                    return Ok(());
+                }
+
+                // Spawn detached child for heavy work
+                let exe = env::current_exe().context("cannot determine own executable path")?;
+                let _child = Command::new(exe)
+                    .arg("--background")
+                    .arg(transcript_path)
+                    .stdin(Stdio::null())
+                    .stdout(Stdio::null())
+                    .stderr(Stdio::null())
+                    .spawn()
+                    .context("failed to spawn background child")?;
+
+                // Signal Claude Code and exit (non-blocking)
+                println!("{{\"continue\": true, \"suppressOutput\": true}}");
+                return Ok(());
+            }
+        }
+    }
+
+    // Try CherryPi stdin_context protocol: stdin has {"workspace": {"current_dir": "..."}}
+    if let Ok(ctx) = serde_json::from_str::<CherryPiContext>(raw) {
+        if let Some(ref current_dir) = ctx.workspace.as_ref().and_then(|w| w.current_dir.as_ref()) {
+            if !current_dir.is_empty() {
+                log(&format!("cherrypi hook: workspace={current_dir}"));
+                handle_cherrypi_hook(current_dir);
+                return Ok(());
+            }
+        }
+    }
+
+    // Neither protocol matched — silently exit (flag day for old hooks without stdin_context)
+    log("stdin: unrecognized payload — neither Claude Code nor CherryPi format");
     Ok(())
 }

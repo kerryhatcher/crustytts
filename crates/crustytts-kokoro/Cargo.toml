@@ -1,0 +1,13 @@
+[package]
+name = "crustytts-kokoro"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "Kokoro-82M neural TTS inference via ONNX Runtime."
+keywords = ["tts", "kokoro", "onnx", "synthesis"]
+categories = ["multimedia::audio"]
+repository = "https://github.com/kerryhatcher/crustytts"
+
+[dependencies]
+crustytts-core = { version = "0.1.0", path = "../crustytts-core" }
+ort = { version = "=2.0.0-rc.10" }

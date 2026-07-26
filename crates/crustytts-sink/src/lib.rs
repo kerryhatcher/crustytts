@@ -1,15 +1,15 @@
-//! Audio output.
+//! Audio output sinks.
+//!
+//! [`AplaySink`] plays through ALSA's `aplay` — works on any Linux box without
+//! linking an audio library. [`CaptureSink`] collects audio in memory for
+//! tests or file output.
 
 use std::io::Write;
 use std::process::{Command, Stdio};
 
-use crate::traits::{Audio, AudioSink, Error};
+use crustytts_core::{Audio, AudioSink, Error};
 
 /// Plays audio through ALSA's `aplay`.
-///
-/// A deliberately minimal default: it works on any Linux box without linking
-/// an audio library. Implement [`AudioSink`] yourself for CPAL, a WAV file, or
-/// a network stream.
 #[derive(Debug, Clone)]
 pub struct AplaySink {
     binary: String,
@@ -59,7 +59,6 @@ impl AudioSink for AplaySink {
             .spawn()
             .map_err(|e| Error::Audio(format!("cannot start {}: {e}", self.binary)))?;
 
-        // Scoped so stdin closes before we wait, or aplay would never see EOF.
         {
             let mut stdin = child
                 .stdin
@@ -126,7 +125,6 @@ mod tests {
 
     #[test]
     fn silence_is_not_sent_to_the_player() {
-        // No audio process should be spawned, so this passes without aplay.
         let audio = Audio {
             samples: vec![],
             sample_rate: 24_000,

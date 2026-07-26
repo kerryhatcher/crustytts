@@ -1,17 +1,17 @@
 //! Loading Kokoro voice embeddings.
+//!
+//! Voices are `[510, 256]` tensors stored as raw little-endian `f32` with no
+//! header — the layout of the `voices/*.bin` files in the
+//! `onnx-community/Kokoro-82M-v1.0-ONNX` repository.
 
 use std::path::Path;
 
-use crate::traits::{Error, Voice};
+use crustytts_core::{Error, Voice};
 
 /// Style vector width for Kokoro-82M: 128 decoder + 128 predictor dimensions.
 pub const KOKORO_STYLE_DIM: usize = 256;
 
 /// Load a voice from a `.bin` file of raw little-endian `f32`.
-///
-/// This is the layout of the `voices/*.bin` files in the
-/// `onnx-community/Kokoro-82M-v1.0-ONNX` repository: a flat `[510, 256]`
-/// tensor with no header, one row per input length.
 pub fn load_voice(path: impl AsRef<Path>) -> Result<Voice, Error> {
     let path = path.as_ref();
     let bytes = std::fs::read(path)
@@ -73,7 +73,6 @@ mod tests {
         assert!(from_bytes(&bytes_for(&[1.0]), 0).is_err(), "zero style_dim");
     }
 
-    /// Longer utterances must not index past the table.
     #[test]
     fn clamps_row_lookup_to_the_last_row() {
         let voice = from_bytes(&bytes_for(&[1.0, 2.0, 3.0, 4.0]), 2).expect("valid");

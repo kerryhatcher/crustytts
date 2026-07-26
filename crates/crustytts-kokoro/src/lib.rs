@@ -1,27 +1,20 @@
 //! Kokoro-82M inference via ONNX Runtime.
 //!
-//! Feature-gated behind `kokoro-onnx` so that using this crate purely as a
-//! phonemizer costs nothing — ONNX Runtime is a heavy dependency and most
-//! callers of [`phonemize`](crate::phonemize) do not need it.
+//! Load once and reuse — construction parses an 80 MB graph, whereas each
+//! [`synthesize`](Synthesizer::synthesize) call is fast.
 
 use std::path::Path;
 
 use ort::session::{builder::GraphOptimizationLevel, Session};
 use ort::value::Tensor;
 
-use crate::traits::{Audio, Error, Synthesizer, Voice};
+use crustytts_core::{Audio, Error, Synthesizer, Voice};
 
 /// Kokoro-82M outputs at a fixed 24 kHz.
 pub const SAMPLE_RATE: u32 = 24_000;
 
 /// Kokoro-82M running on ONNX Runtime.
-///
-/// Load once and reuse — construction parses an 80 MB graph, whereas each
-/// [`synthesize`](Synthesizer::synthesize) call is fast.
 pub struct KokoroOnnx {
-    /// `ort` requires `&mut` to run a session, but [`Synthesizer`] takes
-    /// `&self` so a loaded model can be shared. The mutex reconciles the two;
-    /// contention is irrelevant since inference is serial anyway.
     session: std::sync::Mutex<Session>,
     speed: f32,
 }
@@ -61,8 +54,6 @@ impl Synthesizer for KokoroOnnx {
             });
         }
 
-        // The style row is selected by input length, so prosody adapts to how
-        // much is being said.
         let style = voice.row_for(tokens.len());
 
         let input_ids = Tensor::from_array(([1, tokens.len()], tokens.to_vec()))

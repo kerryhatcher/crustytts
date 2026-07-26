@@ -1,0 +1,36 @@
+[package]
+name = "crustytts-spellcheck"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "Multi-strategy English spell checking: dictionary + edit-distance + LLM, with optional symspell, spellbook (Hunspell), nlprule, and harper-core backends."
+keywords = ["spellcheck", "spelling", "text-processing", "tts"]
+categories = ["text-processing"]
+repository = "https://github.com/kerryhatcher/crustytts"
+
+[features]
+default = ["full"]
+full = ["symspell", "spellbook", "nlprule", "harper"]
+
+# Frequency-weighted symmetric-delete spelling correction.
+symspell = ["dep:symspell"]
+
+# Hunspell-compatible dictionary with affix rules (needs .aff/.dic files at runtime).
+spellbook = ["dep:spellbook"]
+
+# Rule-based grammar checking via LanguageTool rules (needs pre-built .bin files at runtime).
+nlprule = ["dep:nlprule"]
+
+# Modern grammar + spelling checker from Automattic.
+harper = ["dep:harper-core"]
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+reqwest = { version = "0.12", features = ["blocking", "json"] }
+
+# Optional backends
+symspell = { version = "0.5", optional = true }
+spellbook = { version = "0.4", optional = true }
+nlprule = { version = "0.6", optional = true }
+harper-core = { version = "2", optional = true }

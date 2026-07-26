@@ -1,0 +1,12 @@
+[package]
+name = "crustytts-voice"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "Load Kokoro voice embeddings from .bin files or raw bytes."
+keywords = ["tts", "voice", "kokoro"]
+categories = ["multimedia::audio"]
+repository = "https://github.com/kerryhatcher/crustytts"
+
+[dependencies]
+crustytts-core = { version = "0.1.0", path = "../crustytts-core" }

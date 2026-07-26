@@ -1,0 +1,22 @@
+[package]
+name = "crustytts-phonemize"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "English G2P for Kokoro TTS: Misaki dictionary + POS tagger + letter-spelling safety net that never silently drops a word."
+keywords = ["tts", "g2p", "phoneme", "kokoro"]
+categories = ["text-processing"]
+repository = "https://github.com/kerryhatcher/crustytts"
+
+[features]
+default = []
+# Enable the Ollama-based OOV phonemizer for words the dictionary doesn't know.
+oov-llm = ["dep:reqwest", "dep:serde", "dep:serde_json"]
+
+[dependencies]
+crustytts-core = { version = "0.1.0", path = "../crustytts-core" }
+crustytts-normalize = { version = "0.1.0", path = "../crustytts-normalize" }
+voice-g2p = "0.2.2"
+reqwest = { version = "0.12", features = ["blocking", "json"], optional = true }
+serde = { version = "1", features = ["derive"], optional = true }
+serde_json = { version = "1", optional = true }

@@ -1,0 +1,18 @@
+---
+description: Announce long-running task completions via TTS
+alwaysApply: false
+globs: "**/*.{rs,ts,js,py,go,sh}"
+---
+
+When you run a command that will take more than 10 seconds to complete (builds, tests, deploys, batch processing), use TTS to announce completion:
+
+```
+crustytts --say "Build complete."
+```
+
+For long-running operations, also consider announcing major milestones:
+
+```
+crustytts --say "All tests passed."
+crustytts --say "Deployment finished successfully."
+```

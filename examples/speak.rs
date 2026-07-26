@@ -1,10 +1,13 @@
 //! End-to-end: text -> phonemes -> tokens -> audio -> speakers.
 //!
-//! cargo run -p crustytts-lib --features full --example speak -- "hello there"
+//! cargo run --example speak -- "hello there"
 
-use crustytts_lib::{
-    kokoro::KokoroOnnx, sink::AplaySink, AudioSink, KokoroTokenizer, Synthesizer, Tokenizer,
-};
+use crustytts_core::{AudioSink, Synthesizer, Tokenizer};
+use crustytts_kokoro::KokoroOnnx;
+use crustytts_phonemize::phonemize;
+use crustytts_sink::AplaySink;
+use crustytts_tokenizer::KokoroTokenizer;
+use crustytts_voice::load_voice;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let text: String = std::env::args().skip(1).collect::<Vec<_>>().join(" ");
@@ -17,7 +20,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let model = std::env::var("CRUSTYTTS_ONNX_MODEL")?;
     let voice_path = std::env::var("CRUSTYTTS_VOICE")?;
 
-    let out = crustytts_lib::phonemize(&text);
+    let out = phonemize(&text);
     println!("text     : {text}");
     println!("phonemes : {}", out.phonemes);
     if !out.spelled_out.is_empty() {
@@ -25,7 +28,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     let tokens = KokoroTokenizer.encode(&out.phonemes);
-    let voice = crustytts_lib::load_voice(&voice_path)?;
+    let voice = load_voice(&voice_path)?;
     let audio = KokoroOnnx::load(&model)?.synthesize(&tokens, &voice)?;
 
     println!("audio    : {} samples, {:.2}s", audio.samples.len(), audio.duration_secs());

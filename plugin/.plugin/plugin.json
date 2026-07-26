@@ -1,0 +1,31 @@
+{
+  "name": "crustytts",
+  "version": "0.1.0",
+  "description": "Text-to-speech notifications for AI coding agents using Kokoro ONNX TTS (82M-parameter neural model) — no Python, no cloud services, runs locally on your machine.",
+  "author": {
+    "name": "Kerry Hatcher",
+    "url": "https://github.com/kerryhatcher"
+  },
+  "homepage": "https://github.com/kerryhatcher/crustytts",
+  "repository": "https://github.com/kerryhatcher/crustytts",
+  "license": "MIT",
+  "logo": "https://raw.githubusercontent.com/kerryhatcher/crustytts/main/plugin/assets/logo.svg",
+  "keywords": [
+    "tts",
+    "text-to-speech",
+    "kokoro",
+    "notifications",
+    "voice",
+    "audio"
+  ],
+  "commands": "./commands/",
+  "skills": "./skills/",
+  "agents": "./agents/",
+  "rules": "./rules/",
+  "hooks": "./hooks/hooks.json",
+  "status_bar": {
+    "command": "echo tts:${CLAUDE_TTS_VOICE:-af_heart}",
+    "refresh_ms": 30000,
+    "label": "tts"
+  }
+}
