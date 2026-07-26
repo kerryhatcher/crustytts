@@ -1,6 +1,6 @@
 [package]
 name = "crustytts-tokenizer"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 license = "MIT"
 description = "Kokoro-82M phoneme-to-token-id mapping with compile-time embedded vocabulary."
@@ -9,5 +9,5 @@ categories = ["text-processing"]
 repository = "https://github.com/kerryhatcher/crustytts"
 
 [dependencies]
-crustytts-core = { version = "0.1.0", path = "../crustytts-core" }
+crustytts-core = { version = "0.2.0", path = "../crustytts-core" }
 serde_json = "1"

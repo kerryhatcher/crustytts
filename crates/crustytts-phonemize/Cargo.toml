@@ -1,6 +1,6 @@
 [package]
 name = "crustytts-phonemize"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 license = "MIT"
 description = "English G2P for Kokoro TTS: Misaki dictionary + POS tagger + letter-spelling safety net that never silently drops a word."
@@ -14,8 +14,8 @@ default = []
 oov-llm = ["dep:reqwest", "dep:serde", "dep:serde_json"]
 
 [dependencies]
-crustytts-core = { version = "0.1.0", path = "../crustytts-core" }
-crustytts-normalize = { version = "0.1.0", path = "../crustytts-normalize" }
+crustytts-core = { version = "0.2.0", path = "../crustytts-core" }
+crustytts-normalize = { version = "0.2.0", path = "../crustytts-normalize" }
 voice-g2p = "0.2.2"
 reqwest = { version = "0.12", features = ["blocking", "json"], optional = true }
 serde = { version = "1", features = ["derive"], optional = true }

@@ -1,6 +1,6 @@
 [package]
 name = "crustytts-normalize"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 license = "MIT"
 description = "Text normalization for TTS: expands clock times and month abbreviations before phonemization."
@@ -9,4 +9,4 @@ categories = ["text-processing"]
 repository = "https://github.com/kerryhatcher/crustytts"
 
 [dependencies]
-crustytts-core = { version = "0.1.0", path = "../crustytts-core" }
+crustytts-core = { version = "0.2.0", path = "../crustytts-core" }

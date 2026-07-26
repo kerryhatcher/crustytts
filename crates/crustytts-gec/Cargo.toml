@@ -1,6 +1,6 @@
 [package]
 name = "crustytts-gec"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 license = "MIT"
 description = "T5-small ONNX grammar error correction for TTS proofreading"
@@ -14,7 +14,7 @@ default = []
 onnx = ["dep:ort", "dep:tokenizers"]
 
 [dependencies]
-crustytts-core = { version = "0.1.0", path = "../crustytts-core" }
+crustytts-core = { version = "0.2.0", path = "../crustytts-core" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 anyhow = "1"

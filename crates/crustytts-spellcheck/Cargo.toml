@@ -1,6 +1,6 @@
 [package]
 name = "crustytts-spellcheck"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 license = "MIT"
 description = "Multi-strategy English spell checking: dictionary + edit-distance + LLM, with optional symspell, spellbook (Hunspell), nlprule, and harper-core backends."
