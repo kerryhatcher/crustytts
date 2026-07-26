@@ -4,7 +4,7 @@ version = "0.2.0"
 edition = "2021"
 license = "MIT"
 description = "T5-small ONNX grammar error correction for TTS proofreading"
-keywords = ["tts", "gec", "grammar", "onnx", "t5", "text-processing"]
+keywords = ["tts", "gec", "grammar", "onnx", "text-processing"]
 categories = ["text-processing"]
 repository = "https://github.com/kerryhatcher/crustytts"
 
