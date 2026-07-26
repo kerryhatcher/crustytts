@@ -16,7 +16,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.3.1"
+version = "0.3.2"
 edition = "2021"
 license = "MIT"
 repository = "https://github.com/kerryhatcher/crustytts"
@@ -37,19 +37,19 @@ nlprule = "0.6"
 harper-core = "2"
 
 # ── internal (lockstep) ────────────────────────────────────────────────────
-crustytts-core = { version = "0.3.1", path = "crates/crustytts-core" }
-crustytts-normalize = { version = "0.3.1", path = "crates/crustytts-normalize" }
-crustytts-phonemize = { version = "0.3.1", path = "crates/crustytts-phonemize" }
-crustytts-tokenizer = { version = "0.3.1", path = "crates/crustytts-tokenizer" }
-crustytts-kokoro = { version = "0.3.1", path = "crates/crustytts-kokoro" }
-crustytts-sink = { version = "0.3.1", path = "crates/crustytts-sink" }
-crustytts-voice = { version = "0.3.1", path = "crates/crustytts-voice" }
-crustytts-summarize = { version = "0.3.1", path = "crates/crustytts-summarize" }
-crustytts-spellcheck = { version = "0.3.1", path = "crates/crustytts-spellcheck" }
-crustytts-chatspeak = { version = "0.3.1", path = "crates/crustytts-chatspeak" }
-crustytts-sentence = { version = "0.3.1", path = "crates/crustytts-sentence" }
-crustytts-gec = { version = "0.3.1", path = "crates/crustytts-gec" }
-crustytts-codespell = { version = "0.3.1", path = "crates/crustytts-codespell" }
+crustytts-core = { version = "0.3.2", path = "crates/crustytts-core" }
+crustytts-normalize = { version = "0.3.2", path = "crates/crustytts-normalize" }
+crustytts-phonemize = { version = "0.3.2", path = "crates/crustytts-phonemize" }
+crustytts-tokenizer = { version = "0.3.2", path = "crates/crustytts-tokenizer" }
+crustytts-kokoro = { version = "0.3.2", path = "crates/crustytts-kokoro" }
+crustytts-sink = { version = "0.3.2", path = "crates/crustytts-sink" }
+crustytts-voice = { version = "0.3.2", path = "crates/crustytts-voice" }
+crustytts-summarize = { version = "0.3.2", path = "crates/crustytts-summarize" }
+crustytts-spellcheck = { version = "0.3.2", path = "crates/crustytts-spellcheck" }
+crustytts-chatspeak = { version = "0.3.2", path = "crates/crustytts-chatspeak" }
+crustytts-sentence = { version = "0.3.2", path = "crates/crustytts-sentence" }
+crustytts-gec = { version = "0.3.2", path = "crates/crustytts-gec" }
+crustytts-codespell = { version = "0.3.2", path = "crates/crustytts-codespell" }
 
 # ── root package (crustytts binary) ──────────────────────────────────────────
 
