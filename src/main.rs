@@ -385,13 +385,16 @@ fn speak(text: &str) {
     }
 }
 
-/// Synthesize with Kokoro: spellcheck → phonemes (with OOV LLM) → tokens → audio.
+/// Synthesize with Kokoro: spellcheck → phonemes (with custom mapping + OOV LLM) → tokens → audio.
+///
+/// Custom phoneme mappings are loaded from `CRUSTYTTS_CUSTOM_PHONEMES` env var (JSON file).
+/// When set, those mappings are checked before the OOV LLM handler.
 fn speak_kokoro(text: &str) -> anyhow::Result<()> {
     use crustytts_chatspeak::ChatSpeakNormalizer;
     use crustytts_codespell::CodespellDict;
-    use crustytts_core::{AudioSink, ProofingPipeline, Synthesizer, Tokenizer};
+    use crustytts_core::{AudioSink, OovPhonemizer, ProofingPipeline, Synthesizer, Tokenizer};
     use crustytts_kokoro::KokoroOnnx;
-    use crustytts_phonemize::{phonemize_with_oov, OllamaOovPhonemizer};
+    use crustytts_phonemize::{phonemize_with_oov, CustomMapping, OllamaOovPhonemizer};
     use crustytts_sentence::SentenceNormalizer;
     use crustytts_sink::AplaySink;
     use crustytts_spellcheck::{OllamaProvider, SpellChecker};
@@ -432,6 +435,37 @@ fn speak_kokoro(text: &str) -> anyhow::Result<()> {
         OllamaOovPhonemizer::new(spellcheck_model()).with_timeout(5)
     });
 
+    // ── Custom phoneme mappings (loaded once from CRUSTYTTS_CUSTOM_PHONEMES) ──
+    static CUSTOM_PHONEMES: OnceLock<Option<CustomMapping>> = OnceLock::new();
+    let custom = CUSTOM_PHONEMES.get_or_init(|| {
+        let env_path = std::env::var("CRUSTYTTS_CUSTOM_PHONEMES").ok()?;
+        match CustomMapping::from_json_file(&env_path) {
+            Ok(m) => {
+                log(&format!("  loaded {} custom phoneme mappings from {env_path:?}", m.len()));
+                Some(m)
+            }
+            Err(e) => {
+                log(&format!("  failed to load custom phonemes from {env_path:?}: {e}"));
+                None
+            }
+        }
+    });
+
+    // Build the OOV handler chain: custom mappings → LLM fallback
+    struct ChainedOov<'a> {
+        custom: &'a Option<CustomMapping>,
+        llm: &'a OllamaOovPhonemizer,
+    }
+    impl OovPhonemizer for ChainedOov<'_> {
+        fn phonemize_oov(&self, word: &str) -> Option<String> {
+            self.custom
+                .as_ref()
+                .and_then(|m| m.phonemize_oov(word))
+                .or_else(|| self.llm.phonemize_oov(word))
+        }
+    }
+    let handler = ChainedOov { custom, llm: oov };
+
     let corrected = match spellcheck.correct_with_llm(&preprocessed) {
         Ok(c) => c,
         Err(e) => {
@@ -454,7 +488,7 @@ fn speak_kokoro(text: &str) -> anyhow::Result<()> {
         )
     })?;
 
-    let outcome = phonemize_with_oov(&corrected, Some(oov));
+    let outcome = phonemize_with_oov(&corrected, Some(&handler as &dyn OovPhonemizer));
     log(&format!("  phonemes: {}", outcome.phonemes));
     if !outcome.spelled_out.is_empty() {
         // Not an error — these were spelled out rather than dropped. Logged so

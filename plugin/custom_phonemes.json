@@ -1,0 +1,27 @@
+{
+  "version": "1.0",
+  "description": "Custom word-to-phoneme mappings for crustytts TTS. Words not in the Misaki 90k-entry dictionary are checked here before falling back to letter-by-letter spelling.",
+  "mappings": {
+    "astro": "ˈæstɹO",
+    "kubernetes": "kjˈubɚnɛtɪs",
+    "nginx": "ˈɛnʤənˈɛks",
+    "tokio": "tˈOkiO",
+    "crustytts": "krˈʌstsɪts",
+    "kokoro": "kˈOkɚO",
+    "ollama": "ˈɑlɑmə",
+    "misaki": "mɪsˈɑki",
+    "onnx": "ˈɑnɛks",
+    "github": "gˈɪthʌb",
+    "api": "A pˈi",
+    "rustc": "rˈʌst si",
+    "json": "ʤˈeɪsɑn",
+    "yaml": "jˈæməl",
+    "polyfill": "pˈɑlɪfɪl",
+    "esbuild": "ˈɛs bɪld",
+    "vite": "vˈaɪt",
+    "grafana": "grəfˈɑnə",
+    "postgresql": "pˈoʊst grɛs kju ɛl",
+    "mongodb": "mˈɑŋgoʊ di bi",
+    "redis": "rˈɛdɪs"
+  }
+}

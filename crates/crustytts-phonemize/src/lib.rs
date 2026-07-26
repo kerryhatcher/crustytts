@@ -276,6 +276,159 @@ impl OovPhonemizer for OllamaOovPhonemizer {
     }
 }
 
+// ── CustomMapping (deterministic OOV handler) ────────────────────────────────────
+
+/// A deterministic [`OovPhonemizer`] backed by a custom word-to-phoneme map.
+///
+/// Use this to teach the TTS how to pronounce words the Misaki dictionary
+/// doesn't know — as an alternative to the LLM-based [`OllamaOovPhonemizer`].
+///
+/// # Example
+///
+/// ```rust
+/// use crustytts_phonemize::{CustomMapping, phonemize_with_oov};
+///
+/// let mut mapping = CustomMapping::new();
+/// mapping.insert("kubernetes", "kjˈubɚnɛtɪs");
+/// mapping.insert("nginx", "ˈɛnʤənˈɛks");
+///
+/// let out = phonemize_with_oov("deployed to kubernetes", Some(&mapping));
+/// assert!(out.spelled_out.is_empty());
+/// assert!(out.phonemes.contains("kjˈu"));
+/// ```
+///
+/// Mappings are case-insensitive: looking up "Kubernetes" or "KUBERNETES"
+/// will match an entry for "kubernetes".
+#[derive(Debug, Clone, Default)]
+pub struct CustomMapping {
+    map: std::collections::HashMap<String, String>,
+}
+
+impl CustomMapping {
+    /// Create an empty custom mapping.
+    pub fn new() -> Self {
+        Self {
+            map: std::collections::HashMap::new(),
+        }
+    }
+
+    /// Create a custom mapping from an existing word-to-phoneme map.
+    ///
+    /// Keys should be lowercase words; lookups are case-insensitive.
+    pub fn from_map(map: std::collections::HashMap<String, String>) -> Self {
+        Self { map }
+    }
+
+    /// Add a word-to-phoneme mapping.
+    ///
+    /// `word` is lowercased internally, so lookups are case-insensitive.
+    pub fn insert(&mut self, word: &str, phonemes: &str) {
+        self.map.insert(word.to_lowercase(), phonemes.to_string());
+    }
+
+    /// Extend from an iterator of (word, phonemes) pairs.
+    pub fn extend(
+        &mut self,
+        iter: impl IntoIterator<Item = (impl AsRef<str>, impl AsRef<str>)>,
+    ) {
+        for (word, phonemes) in iter {
+            self.insert(word.as_ref(), phonemes.as_ref());
+        }
+    }
+
+    /// Builder-style: add a mapping and return `self`.
+    pub fn with_mapping(mut self, word: &str, phonemes: &str) -> Self {
+        self.insert(word, phonemes);
+        self
+    }
+
+    /// Load mappings from a JSON file where keys are words and values are phoneme strings.
+    ///
+    /// Supports two formats:
+    ///
+    /// **Flat** (simple word → phoneme object):
+    /// ```json
+    /// {
+    ///   "kubernetes": "kjˈubɚnɛtɪs",
+    ///   "nginx": "ˈɛnʤənˈɛks"
+    /// }
+    /// ```
+    ///
+    /// **Wrapped** (with metadata):
+    /// ```json
+    /// {
+    ///   "version": "1.0",
+    ///   "description": "...",
+    ///   "mappings": {
+    ///     "kubernetes": "kjˈubɚnɛtɪs",
+    ///     "nginx": "ˈɛnʤənˈɛks"
+    ///   }
+    /// }
+    /// ```
+    ///
+    /// Requires the `json-import` feature.
+    #[cfg(feature = "json-import")]
+    pub fn from_json_file(path: impl AsRef<std::path::Path>) -> std::io::Result<Self> {
+        let file = std::fs::File::open(path.as_ref())?;
+        let reader = std::io::BufReader::new(file);
+        let raw: serde_json::Value = serde_json::from_reader(reader)?;
+
+        let map: std::collections::HashMap<String, String> = match raw {
+            // Wrapped format: { "version": ..., "mappings": { ... } }
+            serde_json::Value::Object(ref obj) if obj.contains_key("mappings") => {
+                let mappings = obj
+                    .get("mappings")
+                    .and_then(|m| m.as_object())
+                    .ok_or_else(|| {
+                        std::io::Error::new(
+                            std::io::ErrorKind::InvalidData,
+                            "'mappings' field must be an object",
+                        )
+                    })?;
+                mappings
+                    .iter()
+                    .map(|(k, v)| {
+                        let val = v.as_str().unwrap_or_default().to_string();
+                        (k.to_lowercase(), val)
+                    })
+                    .collect()
+            }
+            // Flat format: { "word": "phonemes", ... }
+            _ => {
+                let parsed: std::collections::HashMap<String, String> =
+                    serde_json::from_value(raw).map_err(|e| {
+                        std::io::Error::new(
+                            std::io::ErrorKind::InvalidData,
+                            format!("invalid phoneme mapping JSON: {e}"),
+                        )
+                    })?;
+                parsed
+                    .into_iter()
+                    .map(|(k, v)| (k.to_lowercase(), v))
+                    .collect()
+            }
+        };
+
+        Ok(Self { map })
+    }
+
+    /// The number of entries in this mapping.
+    pub fn len(&self) -> usize {
+        self.map.len()
+    }
+
+    /// Whether the mapping is empty.
+    pub fn is_empty(&self) -> bool {
+        self.map.is_empty()
+    }
+}
+
+impl OovPhonemizer for CustomMapping {
+    fn phonemize_oov(&self, word: &str) -> Option<String> {
+        self.map.get(&word.to_lowercase()).cloned()
+    }
+}
+
 // ── internals ───────────────────────────────────────────────────────────────────
 
 /// Phonemize one word, returning `None` if the dictionary had nothing for it.
@@ -361,6 +514,92 @@ mod tests {
     fn handles_empty_and_punctuation_only_input() {
         assert_eq!(phonemize("").phonemes, "");
         assert!(phonemize("...").spelled_out.is_empty());
+    }
+
+    // ── CustomMapping tests ──────────────────────────────────────────────────
+
+    #[test]
+    fn custom_mapping_covers_oov_word() {
+        let mut mapping = CustomMapping::new();
+        mapping.insert("kubernetes", "kjˈubɚnɛtɪs");
+        let out = phonemize_with_oov("deployed to kubernetes", Some(&mapping));
+        assert!(
+            out.spelled_out.is_empty(),
+            "kubernetes should not be spelled out: {:?}",
+            out.spelled_out
+        );
+        assert!(
+            out.phonemes.contains("kjˈu"),
+            "expected custom phonemes for kubernetes, got: {}",
+            out.phonemes
+        );
+    }
+
+    #[test]
+    fn custom_mapping_case_insensitive() {
+        let mut mapping = CustomMapping::new();
+        mapping.insert("nginx", "ˈɛnʤənˈɛks");
+        let out = phonemize_with_oov("restarted Nginx", Some(&mapping));
+        assert!(
+            out.spelled_out.is_empty(),
+            "case-insensitive match failed: {:?}",
+            out.spelled_out
+        );
+    }
+
+    #[test]
+    fn custom_mapping_unknown_word_still_spelled() {
+        let mut mapping = CustomMapping::new();
+        mapping.insert("kubernetes", "kjˈubɚnɛtɪs");
+        let out = phonemize_with_oov("kubernetes and tokio", Some(&mapping));
+        assert_eq!(
+            out.spelled_out,
+            vec!["tokio"],
+            "tokio should still be spelled out"
+        );
+    }
+
+    #[test]
+    fn custom_mapping_empty_is_noop() {
+        let mapping = CustomMapping::new();
+        let out = phonemize_with_oov("deployed to kubernetes", Some(&mapping));
+        assert_eq!(out.spelled_out, vec!["kubernetes"]);
+    }
+
+    #[test]
+    fn custom_mapping_from_map() {
+        let mut map = std::collections::HashMap::new();
+        map.insert("tokio".into(), "tˈOkiO".into());
+        let mapping = CustomMapping::from_map(map);
+        let out = phonemize_with_oov("tokio runtime", Some(&mapping));
+        assert!(out.spelled_out.is_empty());
+    }
+
+    #[test]
+    fn custom_mapping_builder_style() {
+        let mapping = CustomMapping::new()
+            .with_mapping("kubernetes", "kjˈubɚnɛtɪs")
+            .with_mapping("nginx", "ˈɛnʤənˈɛks");
+        assert_eq!(mapping.len(), 2);
+    }
+
+    #[test]
+    fn custom_mapping_extend() {
+        let mut mapping = CustomMapping::new();
+        mapping.extend([
+            ("kubernetes", "kjˈubɚnɛtɪs"),
+            ("nginx", "ˈɛnʤənˈɛks"),
+        ]);
+        assert_eq!(mapping.len(), 2);
+        let out = phonemize_with_oov("kubernetes nginx", Some(&mapping));
+        assert!(out.spelled_out.is_empty());
+    }
+
+    #[test]
+    fn custom_mapping_can_be_empty() {
+        let mapping = CustomMapping::new();
+        assert!(mapping.is_empty());
+        assert_eq!(mapping.len(), 0);
     }
 
     #[test]

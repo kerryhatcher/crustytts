@@ -17,7 +17,7 @@ members = [
 
 [package]
 name = "crustytts"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2021"
 description = "Claude Code Stop hook TTS announcer — summarizes session transcripts and speaks them aloud via Kokoro-82M neural TTS. No Python, no cloud, no API keys."
 license = "MIT"
@@ -41,7 +41,7 @@ anyhow = "1"
 fs2 = "0.4"
 crustytts-core = { version = "0.2.0", path = "crates/crustytts-core" }
 crustytts-normalize = { version = "0.2.0", path = "crates/crustytts-normalize" }
-crustytts-phonemize = { version = "0.2.0", path = "crates/crustytts-phonemize", features = ["oov-llm"] }
+crustytts-phonemize = { version = "0.3.0", path = "crates/crustytts-phonemize", features = ["oov-llm", "json-import"] }
 crustytts-tokenizer = { version = "0.2.0", path = "crates/crustytts-tokenizer" }
 crustytts-kokoro = { version = "0.2.0", path = "crates/crustytts-kokoro" }
 crustytts-sink = { version = "0.2.0", path = "crates/crustytts-sink" }

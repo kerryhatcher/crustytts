@@ -1,6 +1,6 @@
 {
   "name": "crustytts",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Text-to-speech notifications for AI coding agents using Kokoro ONNX TTS (82M-parameter neural model) — no Python, no cloud services, runs locally on your machine.",
   "author": {
     "name": "Kerry Hatcher",
