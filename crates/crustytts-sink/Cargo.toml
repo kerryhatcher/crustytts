@@ -1,12 +1,12 @@
 [package]
 name = "crustytts-sink"
-version = "0.2.0"
-edition = "2021"
-license = "MIT"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
 description = "Audio output sinks for crustytts: aplay (ALSA) and in-memory capture for testing."
 keywords = ["tts", "audio", "aplay"]
 categories = ["multimedia::audio"]
-repository = "https://github.com/kerryhatcher/crustytts"
 
 [dependencies]
-crustytts-core = { version = "0.2.0", path = "../crustytts-core" }
+crustytts-core.workspace = true

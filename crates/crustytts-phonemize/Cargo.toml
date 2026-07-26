@@ -1,12 +1,12 @@
 [package]
 name = "crustytts-phonemize"
-version = "0.3.0"
-edition = "2021"
-license = "MIT"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
 description = "English G2P for Kokoro TTS: Misaki dictionary + POS tagger + letter-spelling safety net that never silently drops a word."
 keywords = ["tts", "g2p", "phoneme", "kokoro"]
 categories = ["text-processing"]
-repository = "https://github.com/kerryhatcher/crustytts"
 
 [features]
 default = []
@@ -16,9 +16,9 @@ oov-llm = ["dep:reqwest", "dep:serde", "dep:serde_json"]
 json-import = ["dep:serde", "dep:serde_json"]
 
 [dependencies]
-crustytts-core = { version = "0.2.0", path = "../crustytts-core" }
-crustytts-normalize = { version = "0.2.0", path = "../crustytts-normalize" }
-voice-g2p = "0.2.2"
-reqwest = { version = "0.12", features = ["blocking", "json"], optional = true }
-serde = { version = "1", features = ["derive"], optional = true }
-serde_json = { version = "1", optional = true }
+crustytts-core.workspace = true
+crustytts-normalize.workspace = true
+voice-g2p.workspace = true
+reqwest = { workspace = true, optional = true }
+serde = { workspace = true, optional = true }
+serde_json = { workspace = true, optional = true }

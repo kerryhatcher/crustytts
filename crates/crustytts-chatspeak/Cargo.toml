@@ -1,12 +1,12 @@
 [package]
 name = "crustytts-chatspeak"
-version = "0.2.0"
-edition = "2021"
-license = "MIT"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
 description = "Chat-speak abbreviation expansion and acronym capitalization for TTS proofreading"
 keywords = ["tts", "chatspeak", "abbreviation", "normalization", "text-processing"]
 categories = ["text-processing"]
-repository = "https://github.com/kerryhatcher/crustytts"
 
 [dependencies]
-crustytts-core = { version = "0.2.0", path = "../crustytts-core" }
+crustytts-core.workspace = true

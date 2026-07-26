@@ -1029,7 +1029,7 @@ checksum = "460fbee9c2c2f33933d720630a6a0bac33ba7053db5344fac858d4b8952d77d5"
 
 [[package]]
 name = "crustytts"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "anyhow",
  "crustytts-chatspeak",
@@ -1052,25 +1052,25 @@ dependencies = [
 
 [[package]]
 name = "crustytts-chatspeak"
-version = "0.2.0"
+version = "0.3.1"
 dependencies = [
  "crustytts-core",
 ]
 
 [[package]]
 name = "crustytts-codespell"
-version = "0.2.0"
+version = "0.3.1"
 dependencies = [
  "crustytts-core",
 ]
 
 [[package]]
 name = "crustytts-core"
-version = "0.2.0"
+version = "0.3.1"
 
 [[package]]
 name = "crustytts-gec"
-version = "0.2.0"
+version = "0.3.1"
 dependencies = [
  "anyhow",
  "crustytts-core",
@@ -1082,7 +1082,7 @@ dependencies = [
 
 [[package]]
 name = "crustytts-kokoro"
-version = "0.2.0"
+version = "0.3.1"
 dependencies = [
  "crustytts-core",
  "ort",
@@ -1090,14 +1090,14 @@ dependencies = [
 
 [[package]]
 name = "crustytts-normalize"
-version = "0.2.0"
+version = "0.3.1"
 dependencies = [
  "crustytts-core",
 ]
 
 [[package]]
 name = "crustytts-phonemize"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "crustytts-core",
  "crustytts-normalize",
@@ -1109,21 +1109,21 @@ dependencies = [
 
 [[package]]
 name = "crustytts-sentence"
-version = "0.2.0"
+version = "0.3.1"
 dependencies = [
  "crustytts-core",
 ]
 
 [[package]]
 name = "crustytts-sink"
-version = "0.2.0"
+version = "0.3.1"
 dependencies = [
  "crustytts-core",
 ]
 
 [[package]]
 name = "crustytts-spellcheck"
-version = "0.2.0"
+version = "0.3.1"
 dependencies = [
  "harper-core",
  "nlprule",
@@ -1136,7 +1136,7 @@ dependencies = [
 
 [[package]]
 name = "crustytts-summarize"
-version = "0.2.0"
+version = "0.3.1"
 dependencies = [
  "reqwest",
  "serde",
@@ -1145,7 +1145,7 @@ dependencies = [
 
 [[package]]
 name = "crustytts-tokenizer"
-version = "0.2.0"
+version = "0.3.1"
 dependencies = [
  "crustytts-core",
  "serde_json",
@@ -1153,7 +1153,7 @@ dependencies = [
 
 [[package]]
 name = "crustytts-voice"
-version = "0.2.0"
+version = "0.3.1"
 dependencies = [
  "crustytts-core",
 ]
