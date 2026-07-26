@@ -90,3 +90,4 @@ crustytts-chatspeak.workspace = true
 crustytts-sentence.workspace = true
 crustytts-gec.workspace = true
 crustytts-codespell.workspace = true
+flate2 = "1.1"

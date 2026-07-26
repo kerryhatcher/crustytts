@@ -36,6 +36,7 @@ use std::path::PathBuf;
 use std::process::{Command, Stdio};
 
 use anyhow::Context;
+use crustytts_core::Outcome;
 use fs2::FileExt;
 use serde::Deserialize;
 
@@ -491,10 +492,9 @@ fn speak_kokoro(text: &str) -> anyhow::Result<()> {
     let outcome = phonemize_with_oov(&corrected, Some(&handler as &dyn OovPhonemizer));
     log(&format!("  phonemes: {}", outcome.phonemes));
     if !outcome.spelled_out.is_empty() {
-        // Not an error — these were spelled out rather than dropped. Logged so
-        // the words worth adding to a dictionary are visible.
         log(&format!("  spelled out: {:?}", outcome.spelled_out));
     }
+    log_spelled_out(text, &outcome);
 
     let tokens = KokoroTokenizer.encode(&outcome.phonemes);
     let voice = load_voice(&voice_path)?;
@@ -509,6 +509,153 @@ fn speak_kokoro(text: &str) -> anyhow::Result<()> {
 
     AplaySink::new().play(&audio)?;
     Ok(())
+}
+
+// ── Spelled-out word logger ─────────────────────────────────────────────────────
+//
+// Logs every utterance where the G2P dictionary had to spell a word out
+// letter by letter.  The log is in JSONL format (~/.crustytts/logs/spellout.jsonl)
+// and rotates at 10 MiB, keeping 7 compressed (gzip) archives.
+//
+// Review these logs to discover which words need custom phoneme mappings.
+
+const SPELLOUT_MAX_BYTES: u64 = 10 * 1024 * 1024;
+const SPELLOUT_KEEP: usize = 7;
+const SPELLOUT_FILE: &str = "spellout.jsonl";
+
+/// Directory for spellout logs: `$HOME/.crustytts/logs/`.
+fn spellout_dir() -> PathBuf {
+    let home = env::var("HOME")
+        .or_else(|_| env::var("USERPROFILE"))
+        .unwrap_or_else(|_| ".".into());
+    PathBuf::from(home).join(".crustytts/logs")
+}
+
+/// Ensure the log directory exists.
+fn ensure_spellout_dir() -> std::io::Result<PathBuf> {
+    let dir = spellout_dir();
+    std::fs::create_dir_all(&dir)?;
+    Ok(dir)
+}
+
+/// Format the current UTC time as an ISO 8601 string (no extra deps needed).
+fn utc_iso_now() -> String {
+    let dur = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default();
+    let total = dur.as_secs();
+    let days = total / 86400;
+    let rem = total % 86400;
+    let h = rem / 3600;
+    let m = (rem % 3600) / 60;
+    let s = rem % 60;
+
+    // Days to date (civil-from-rd algorithm, no leap-second tables)
+    let z = days as i64 + 719468;
+    let era = if z >= 0 { z } else { z - 146096 } / 146097;
+    let doe = z - era * 146097;
+    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+    let y = yoe + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let mo = if mp < 10 { mp + 3 } else { mp - 9 };
+    let yr = if mo <= 2 { y + 1 } else { y };
+
+    format!("{:04}-{:02}-{:02}T{:02}:{:02}:{:02}Z", yr, mo, d, h, m, s)
+}
+
+/// Write a single JSONL entry recording a spelled-out utterance.
+fn log_spelled_out(original_text: &str, outcome: &Outcome) {
+    if outcome.spelled_out.is_empty() {
+        return;
+    }
+
+    let dir = match ensure_spellout_dir() {
+        Ok(d) => d,
+        Err(e) => {
+            log(&format!("spellout: cannot create log dir: {e}"));
+            return;
+        }
+    };
+
+    let log_path = dir.join(SPELLOUT_FILE);
+
+    // Rotate if current log exceeds size limit
+    if let Ok(meta) = std::fs::metadata(&log_path) {
+        if meta.len() >= SPELLOUT_MAX_BYTES {
+            rotate_spellout_log(&dir);
+        }
+    }
+
+    let entry = serde_json::json!({
+        "timestamp": utc_iso_now(),
+        "text": original_text,
+        "spelled_out": outcome.spelled_out,
+        "phonemes": outcome.phonemes,
+    });
+
+    use std::io::Write;
+
+    match std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&log_path)
+    {
+        Ok(mut fh) => {
+            let line = serde_json::to_string(&entry).unwrap_or_default();
+            let _ = writeln!(fh, "{line}");
+        }
+        Err(e) => {
+            log(&format!("spellout: cannot write to {:?}: {e}", log_path));
+        }
+    }
+}
+
+/// Rotate the spellout log: shift archives, gzip the current file.
+///
+/// Before:  spellout.jsonl  (active, ~10 MiB)
+/// After:   new spellout.jsonl (empty)
+///          spellout.jsonl.1.gz
+///          …
+///          spellout.jsonl.7.gz  (removed)
+fn rotate_spellout_log(dir: &std::path::Path) {
+    use std::fs;
+    use std::io::{Read, Write};
+
+    let stem = dir.join(SPELLOUT_FILE);
+
+    // Drop oldest archive
+    let _ = fs::remove_file(stem.with_extension(format!("jsonl.{SPELLOUT_KEEP}.gz")));
+
+    // Shift archives up: 6->7, 5->6, ..., 1->2
+    for i in (1..SPELLOUT_KEEP).rev() {
+        let old_name = format!("jsonl.{i}.gz");
+        let new_name = format!("jsonl.{}.gz", i + 1);
+        let old = stem.with_extension(&old_name);
+        let new = stem.with_extension(&new_name);
+        if old.exists() {
+            let _ = fs::rename(&old, &new);
+        }
+    }
+
+    // Gzip current file -> .1.gz
+    if let Ok(mut src) = fs::File::open(&stem) {
+        let gz_path = stem.with_extension("jsonl.1.gz");
+        if let Ok(dst) = fs::File::create(&gz_path) {
+            use flate2::write::GzEncoder;
+            use flate2::Compression;
+            let mut encoder = GzEncoder::new(dst, Compression::default());
+            let mut buf = Vec::new();
+            if src.read_to_end(&mut buf).is_ok() {
+                let _ = encoder.write_all(&buf);
+                let _ = encoder.finish();
+            }
+        }
+    }
+
+    // Truncate current file for fresh logging
+    let _ = fs::File::create(&stem);
 }
 
 /// Print spellcheck results for a string — for testing/debugging.
