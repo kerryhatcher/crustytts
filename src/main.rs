@@ -428,6 +428,8 @@ fn speak_kokoro(text: &str) -> anyhow::Result<()> {
             .allow("ONNX")
             .allow("Ollama")
             .allow("Misaki")
+            .allow("SIGTERM")
+            .allow("fallback")
             .with_llm(OllamaProvider::new(spellcheck_model()).with_timeout(5))
     });
 
@@ -675,6 +677,8 @@ fn spellcheck_test(text: &str, use_llm: bool) {
             .allow("ONNX")
             .allow("Ollama")
             .allow("Misaki")
+            .allow("SIGTERM")
+            .allow("fallback")
             .with_llm(OllamaProvider::new(spellcheck_model()).with_timeout(5))
     });
 
@@ -766,6 +770,8 @@ fn proof_test(text: &str) {
             .allow("ONNX")
             .allow("Ollama")
             .allow("Misaki")
+            .allow("SIGTERM")
+            .allow("fallback")
             .with_llm(OllamaProvider::new(spellcheck_model()).with_timeout(10))
     });
 

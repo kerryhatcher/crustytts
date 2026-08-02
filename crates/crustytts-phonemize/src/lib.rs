@@ -68,11 +68,13 @@ pub fn phonemize_with_oov(text: &str, oov: Option<&dyn OovPhonemizer>) -> Outcom
             if let Some(phonemes) = handler.phonemize_oov(word) {
                 let trimmed = phonemes.trim().to_string();
                 if !trimmed.is_empty() {
-                    // Insert a placeholder word the G2P engine can pronounce,
-                    // then we'll swap in the real phonemes after.
+                    // Insert one known placeholder word so the G2P output keeps
+                    // the same token count. Spelling the OOV word into multiple
+                    // letter tokens leaves trailing letters behind when the
+                    // single original token is replaced in pass 3.
                     oov_replacements.push((token_idx, format!("{leading}{trimmed}{trailing}")));
                     prepared.push_str(leading);
-                    prepared.push_str(&spaced_letters(word)); // placeholder for G2P
+                    prepared.push_str("test");
                     prepared.push_str(trailing);
                     handled = true;
                 }
@@ -533,6 +535,7 @@ mod tests {
             "expected custom phonemes for kubernetes, got: {}",
             out.phonemes
         );
+        assert_eq!(out.phonemes, "dəplˈYd tə kjˈubɚnɛtɪs");
     }
 
     #[test]
