@@ -17,6 +17,10 @@ transcript path cwd:
 setup: _ensure-installed
     cargo run --release -- --setup
 
+# Preserve existing ~/.codex/hooks.json entries and add the Codex Stop hook.
+setup-codex: _ensure-installed
+    cargo run --release -- --setup-codex
+
 # Install the binary to ~/.cargo/bin so it's on PATH
 install: build
     cargo install --path .

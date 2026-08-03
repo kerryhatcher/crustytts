@@ -31,7 +31,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let voice = load_voice(&voice_path)?;
     let audio = KokoroOnnx::load(&model)?.synthesize(&tokens, &voice)?;
 
-    println!("audio    : {} samples, {:.2}s", audio.samples.len(), audio.duration_secs());
+    println!(
+        "audio    : {} samples, {:.2}s",
+        audio.samples.len(),
+        audio.duration_secs()
+    );
     AplaySink::new().play(&audio)?;
     Ok(())
 }

@@ -76,5 +76,8 @@ pub fn summarize(req: &SummarizeRequest<'_>) -> Result<Option<String>, String> {
         .json()
         .map_err(|e| format!("Ollama response parse failed: {e}"))?;
 
-    Ok(body.response.map(|s| s.trim().to_string()).filter(|s| !s.is_empty()))
+    Ok(body
+        .response
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty()))
 }

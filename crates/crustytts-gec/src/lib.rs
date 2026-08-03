@@ -84,7 +84,7 @@ impl std::error::Error for GecError {}
 #[cfg(feature = "onnx")]
 mod onnx_impl {
     use super::*;
-    use ort::{Environment, Session, SessionBuilder, GraphOptimizationLevel, inputs};
+    use ort::{inputs, Environment, GraphOptimizationLevel, Session, SessionBuilder};
     use std::sync::OnceLock;
     use tokenizers::Tokenizer;
 
@@ -108,9 +108,7 @@ mod onnx_impl {
             let tokenizer_path = model_dir.join("tokenizer.json");
 
             if !model_path.exists() {
-                return Err(GecError::ModelNotFound(
-                    model_path.display().to_string(),
-                ));
+                return Err(GecError::ModelNotFound(model_path.display().to_string()));
             }
             if !tokenizer_path.exists() {
                 return Err(GecError::ModelNotFound(
@@ -191,29 +189,26 @@ mod onnx_impl {
             let input_len = input_ids.len();
             let mask_len = attention_mask.len();
 
-            let input_tensor = ort::Tensor::from_shape_vec(
-                (1, input_len),
-                input_ids,
-            ).map_err(|e| GecError::Inference(e.to_string()))?;
+            let input_tensor = ort::Tensor::from_shape_vec((1, input_len), input_ids)
+                .map_err(|e| GecError::Inference(e.to_string()))?;
 
-            let mask_tensor = ort::Tensor::from_shape_vec(
-                (1, mask_len),
-                attention_mask,
-            ).map_err(|e| GecError::Inference(e.to_string()))?;
+            let mask_tensor = ort::Tensor::from_shape_vec((1, mask_len), attention_mask)
+                .map_err(|e| GecError::Inference(e.to_string()))?;
 
-            let decoder_tensor = ort::Tensor::from_shape_vec(
-                (1, 1),
-                decoder_input_ids,
-            ).map_err(|e| GecError::Inference(e.to_string()))?;
+            let decoder_tensor = ort::Tensor::from_shape_vec((1, 1), decoder_input_ids)
+                .map_err(|e| GecError::Inference(e.to_string()))?;
 
             // Run inference
             let outputs = self
                 .session
-                .run(inputs![
-                    "input_ids" => input_tensor,
-                    "attention_mask" => mask_tensor,
-                    "decoder_input_ids" => decoder_tensor,
-                ].map_err(|e| GecError::Inference(e.to_string()))?)
+                .run(
+                    inputs![
+                        "input_ids" => input_tensor,
+                        "attention_mask" => mask_tensor,
+                        "decoder_input_ids" => decoder_tensor,
+                    ]
+                    .map_err(|e| GecError::Inference(e.to_string()))?,
+                )
                 .map_err(|e| GecError::Inference(e.to_string()))?;
 
             // Extract output token ids

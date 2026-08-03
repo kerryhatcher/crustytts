@@ -234,14 +234,54 @@ fn is_abbreviation_period(chars: &[char], period_pos: usize) -> bool {
 
     matches!(
         lower.as_str(),
-        "dr" | "mr" | "mrs" | "ms" | "prof" | "sr" | "jr"
-            | "vs" | "etc" | "inc" | "ltd" | "co" | "corp"
-            | "st" | "ave" | "blvd" | "rd" | "dept" | "est"
-            | "approx" | "esp" | "gen" | "govt"
-            | "a" | "b" | "c" | "d" | "e" | "f" | "g" | "h"
-            | "i" | "j" | "k" | "l" | "m" | "n" | "o" | "p"
-            | "q" | "r" | "s" | "t" | "u" | "v" | "w" | "x"
-            | "y" | "z"
+        "dr" | "mr"
+            | "mrs"
+            | "ms"
+            | "prof"
+            | "sr"
+            | "jr"
+            | "vs"
+            | "etc"
+            | "inc"
+            | "ltd"
+            | "co"
+            | "corp"
+            | "st"
+            | "ave"
+            | "blvd"
+            | "rd"
+            | "dept"
+            | "est"
+            | "approx"
+            | "esp"
+            | "gen"
+            | "govt"
+            | "a"
+            | "b"
+            | "c"
+            | "d"
+            | "e"
+            | "f"
+            | "g"
+            | "h"
+            | "i"
+            | "j"
+            | "k"
+            | "l"
+            | "m"
+            | "n"
+            | "o"
+            | "p"
+            | "q"
+            | "r"
+            | "s"
+            | "t"
+            | "u"
+            | "v"
+            | "w"
+            | "x"
+            | "y"
+            | "z"
     )
 }
 
@@ -263,9 +303,25 @@ fn capitalize_first(text: &str) -> String {
 fn is_ambiguous_question_starter(word: &str) -> bool {
     matches!(
         word,
-        "is" | "are" | "was" | "were" | "has" | "have" | "had"
-            | "do" | "does" | "did" | "am" | "may" | "might" | "must"
-            | "can" | "could" | "would" | "should" | "shall" | "will"
+        "is" | "are"
+            | "was"
+            | "were"
+            | "has"
+            | "have"
+            | "had"
+            | "do"
+            | "does"
+            | "did"
+            | "am"
+            | "may"
+            | "might"
+            | "must"
+            | "can"
+            | "could"
+            | "would"
+            | "should"
+            | "shall"
+            | "will"
             | "need"
     )
 }
@@ -284,10 +340,9 @@ fn has_question_subject(lower: &str, first_word: &str) -> bool {
 
 fn default_question_starters() -> Vec<&'static str> {
     vec![
-        "who", "what", "where", "when", "why", "how", "which", "whose",
-        "whom", "can", "could", "would", "should", "shall", "will",
-        "do", "does", "did", "is", "are", "was", "were", "has", "have",
-        "had", "am", "may", "might", "must", "need", "dare", "ought",
+        "who", "what", "where", "when", "why", "how", "which", "whose", "whom", "can", "could",
+        "would", "should", "shall", "will", "do", "does", "did", "is", "are", "was", "were", "has",
+        "have", "had", "am", "may", "might", "must", "need", "dare", "ought",
     ]
 }
 
@@ -301,7 +356,10 @@ mod tests {
     fn capitalizes_first_word() {
         let sn = SentenceNormalizer::new();
         assert_eq!(sn.proof("claude finished."), "Claude finished.");
-        assert_eq!(sn.proof("the display is working."), "The display is working.");
+        assert_eq!(
+            sn.proof("the display is working."),
+            "The display is working."
+        );
     }
 
     #[test]
@@ -314,10 +372,7 @@ mod tests {
     #[test]
     fn adds_question_mark_for_questions() {
         let sn = SentenceNormalizer::new();
-        assert_eq!(
-            sn.proof("can we do a game mode"),
-            "Can we do a game mode?"
-        );
+        assert_eq!(sn.proof("can we do a game mode"), "Can we do a game mode?");
         assert_eq!(
             sn.proof("how do we jump brown foxes"),
             "How do we jump brown foxes?"
@@ -330,10 +385,7 @@ mod tests {
     fn handles_multiple_sentences() {
         let sn = SentenceNormalizer::new();
         let result = sn.proof("claude finished. can we do a game mode");
-        assert_eq!(
-            result,
-            "Claude finished. Can we do a game mode?"
-        );
+        assert_eq!(result, "Claude finished. Can we do a game mode?");
     }
 
     #[test]
@@ -371,9 +423,6 @@ mod tests {
     fn question_with_mid_sentence_pattern() {
         let sn = SentenceNormalizer::new();
         // "can we" mid-sentence triggers question mark
-        assert_eq!(
-            sn.proof("so can we start now"),
-            "So can we start now?"
-        );
+        assert_eq!(sn.proof("so can we start now"), "So can we start now?");
     }
 }

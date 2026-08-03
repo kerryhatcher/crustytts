@@ -55,11 +55,7 @@ pub trait LlmProvider: Send + Sync {
     ///
     /// Returns a `Vec<bool>` parallel to `proposals`: `true` = accept, `false` = reject.
     /// The default implementation accepts everything — override for LLM-based decision.
-    fn review_proposals(
-        &self,
-        _text: &str,
-        proposals: &[Proposal],
-    ) -> Result<Vec<bool>, String> {
+    fn review_proposals(&self, _text: &str, proposals: &[Proposal]) -> Result<Vec<bool>, String> {
         Ok(vec![true; proposals.len()])
     }
 }
@@ -213,8 +209,7 @@ impl NlpRuleChecker {
     pub fn load(tokenizer_path: &str, rules_path: &str) -> Result<Self, String> {
         let tokenizer = nlprule::Tokenizer::new(tokenizer_path)
             .map_err(|e| format!("nlprule tokenizer: {e}"))?;
-        let rules = nlprule::Rules::new(rules_path)
-            .map_err(|e| format!("nlprule rules: {e}"))?;
+        let rules = nlprule::Rules::new(rules_path).map_err(|e| format!("nlprule rules: {e}"))?;
         Ok(Self { tokenizer, rules })
     }
 }
@@ -389,11 +384,7 @@ impl LlmProvider for OllamaProvider {
         parse_llm_spelling_response(&raw, words.len())
     }
 
-    fn review_proposals(
-        &self,
-        text: &str,
-        proposals: &[Proposal],
-    ) -> Result<Vec<bool>, String> {
+    fn review_proposals(&self, text: &str, proposals: &[Proposal]) -> Result<Vec<bool>, String> {
         if proposals.is_empty() {
             return Ok(Vec::new());
         }
@@ -514,7 +505,6 @@ impl SpellChecker {
         self
     }
 
-
     pub fn allow(mut self, word: impl Into<String>) -> Self {
         self.allowlist.insert(word.into().to_lowercase());
         self
@@ -608,7 +598,11 @@ impl SpellChecker {
     /// 5. Applies only the LLM-approved changes.
     ///
     /// Returns an error if an LLM provider is not configured.
-    pub fn correct_full(&self, text: &str, grammar: Option<&dyn GrammarChecker>) -> Result<String, String> {
+    pub fn correct_full(
+        &self,
+        text: &str,
+        grammar: Option<&dyn GrammarChecker>,
+    ) -> Result<String, String> {
         let llm = self
             .llm
             .as_ref()
@@ -672,9 +666,7 @@ impl SpellChecker {
         // Step 6: apply only accepted proposals
         let mut result = text.to_string();
         let mut accepted: Vec<(&Proposal, bool)> = proposals.iter().zip(decisions).collect();
-        accepted.sort_by_key(|(p, _)| {
-            std::cmp::Reverse(result.find(&p.original))
-        });
+        accepted.sort_by_key(|(p, _)| std::cmp::Reverse(result.find(&p.original)));
 
         for (proposal, accepted) in &accepted {
             if !accepted {
@@ -936,7 +928,10 @@ mod tests {
     fn tokenize_handles_punctuation() {
         let words = tokenize_words("Hello, world! How's it going?");
         let text_words: Vec<&str> = words.iter().map(|(_, w)| w.as_str()).collect();
-        assert_eq!(text_words, vec!["Hello", "world", "How", "s", "it", "going"]);
+        assert_eq!(
+            text_words,
+            vec!["Hello", "world", "How", "s", "it", "going"]
+        );
     }
 
     #[test]
@@ -1019,8 +1014,14 @@ mod tests {
     fn auto_correct_applies_high_confidence_only() {
         let checker = SpellChecker::new();
         let result = checker.correct("the begining of kubernetes");
-        assert!(result.contains("beginning"), "should fix 'begining': {result}");
-        assert!(result.contains("kubernetes"), "should keep 'kubernetes': {result}");
+        assert!(
+            result.contains("beginning"),
+            "should fix 'begining': {result}"
+        );
+        assert!(
+            result.contains("kubernetes"),
+            "should keep 'kubernetes': {result}"
+        );
     }
 
     #[test]
@@ -1074,7 +1075,9 @@ mod tests {
     fn custom_dictionary_is_used() {
         struct EmptyDict;
         impl Dictionary for EmptyDict {
-            fn contains(&self, _word: &str) -> bool { false }
+            fn contains(&self, _word: &str) -> bool {
+                false
+            }
         }
         let checker = SpellChecker::new().with_dictionary(EmptyDict);
         let issues = checker.check("the quick brown fox");
@@ -1085,7 +1088,9 @@ mod tests {
     fn custom_dictionary_can_accept_everything() {
         struct YesDict;
         impl Dictionary for YesDict {
-            fn contains(&self, _word: &str) -> bool { true }
+            fn contains(&self, _word: &str) -> bool {
+                true
+            }
         }
         let checker = SpellChecker::new().with_dictionary(YesDict);
         let issues = checker.check("the quick brown fox");
@@ -1112,10 +1117,18 @@ mod tests {
     fn correct_full_applies_spellcheck_when_llm_accepts() {
         struct YesLlm;
         impl LlmProvider for YesLlm {
-            fn review_words(&self, _text: &str, _words: &[&str]) -> Result<Vec<Option<String>>, String> {
+            fn review_words(
+                &self,
+                _text: &str,
+                _words: &[&str],
+            ) -> Result<Vec<Option<String>>, String> {
                 Ok(vec![])
             }
-            fn review_proposals(&self, _text: &str, proposals: &[Proposal]) -> Result<Vec<bool>, String> {
+            fn review_proposals(
+                &self,
+                _text: &str,
+                proposals: &[Proposal],
+            ) -> Result<Vec<bool>, String> {
                 Ok(vec![true; proposals.len()])
             }
         }
@@ -1128,10 +1141,18 @@ mod tests {
     fn correct_full_rejects_when_llm_says_no() {
         struct NoLlm;
         impl LlmProvider for NoLlm {
-            fn review_words(&self, _text: &str, _words: &[&str]) -> Result<Vec<Option<String>>, String> {
+            fn review_words(
+                &self,
+                _text: &str,
+                _words: &[&str],
+            ) -> Result<Vec<Option<String>>, String> {
                 Ok(vec![])
             }
-            fn review_proposals(&self, _text: &str, proposals: &[Proposal]) -> Result<Vec<bool>, String> {
+            fn review_proposals(
+                &self,
+                _text: &str,
+                proposals: &[Proposal],
+            ) -> Result<Vec<bool>, String> {
                 Ok(vec![false; proposals.len()])
             }
         }
@@ -1152,20 +1173,32 @@ mod tests {
             proposals: std::sync::Mutex<Vec<Proposal>>,
         }
         impl LlmProvider for RecordLlm {
-            fn review_words(&self, _text: &str, _words: &[&str]) -> Result<Vec<Option<String>>, String> {
+            fn review_words(
+                &self,
+                _text: &str,
+                _words: &[&str],
+            ) -> Result<Vec<Option<String>>, String> {
                 Ok(vec![])
             }
-            fn review_proposals(&self, _text: &str, proposals: &[Proposal]) -> Result<Vec<bool>, String> {
+            fn review_proposals(
+                &self,
+                _text: &str,
+                proposals: &[Proposal],
+            ) -> Result<Vec<bool>, String> {
                 let mut p = self.proposals.lock().unwrap();
                 p.extend(proposals.iter().cloned());
                 Ok(vec![true; proposals.len()])
             }
         }
-        let llm = RecordLlm { proposals: std::sync::Mutex::new(Vec::new()) };
+        let llm = RecordLlm {
+            proposals: std::sync::Mutex::new(Vec::new()),
+        };
         let checker = SpellChecker::new().with_llm(llm);
         let grammar = StubGrammar;
         // "she was not here" — all words in dict, grammar changes "was not" → "were not"
-        let _ = checker.correct_full("she was not here", Some(&grammar)).unwrap();
+        let _ = checker
+            .correct_full("she was not here", Some(&grammar))
+            .unwrap();
         // The grammar proposal should have been recorded
         // (spellcheck finds no issues, grammar proposes a change)
     }

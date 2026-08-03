@@ -248,11 +248,7 @@ impl OovPhonemizer for OllamaOovPhonemizer {
                 .json()
                 .map_err(|e| format!("Ollama response parse failed: {e}"))?;
 
-            let text = body
-                .response
-                .unwrap_or_default()
-                .trim()
-                .to_string();
+            let text = body.response.unwrap_or_default().trim().to_string();
 
             Ok(if text.is_empty() { None } else { Some(text) })
         })();
@@ -329,10 +325,7 @@ impl CustomMapping {
     }
 
     /// Extend from an iterator of (word, phonemes) pairs.
-    pub fn extend(
-        &mut self,
-        iter: impl IntoIterator<Item = (impl AsRef<str>, impl AsRef<str>)>,
-    ) {
+    pub fn extend(&mut self, iter: impl IntoIterator<Item = (impl AsRef<str>, impl AsRef<str>)>) {
         for (word, phonemes) in iter {
             self.insert(word.as_ref(), phonemes.as_ref());
         }
@@ -378,15 +371,15 @@ impl CustomMapping {
         let map: std::collections::HashMap<String, String> = match raw {
             // Wrapped format: { "version": ..., "mappings": { ... } }
             serde_json::Value::Object(ref obj) if obj.contains_key("mappings") => {
-                let mappings = obj
-                    .get("mappings")
-                    .and_then(|m| m.as_object())
-                    .ok_or_else(|| {
-                        std::io::Error::new(
-                            std::io::ErrorKind::InvalidData,
-                            "'mappings' field must be an object",
-                        )
-                    })?;
+                let mappings =
+                    obj.get("mappings")
+                        .and_then(|m| m.as_object())
+                        .ok_or_else(|| {
+                            std::io::Error::new(
+                                std::io::ErrorKind::InvalidData,
+                                "'mappings' field must be an object",
+                            )
+                        })?;
                 mappings
                     .iter()
                     .map(|(k, v)| {
@@ -397,8 +390,8 @@ impl CustomMapping {
             }
             // Flat format: { "word": "phonemes", ... }
             _ => {
-                let parsed: std::collections::HashMap<String, String> =
-                    serde_json::from_value(raw).map_err(|e| {
+                let parsed: std::collections::HashMap<String, String> = serde_json::from_value(raw)
+                    .map_err(|e| {
                         std::io::Error::new(
                             std::io::ErrorKind::InvalidData,
                             format!("invalid phoneme mapping JSON: {e}"),
@@ -456,7 +449,9 @@ fn split_affixes(token: &str) -> (&str, &str, &str) {
         .unwrap_or(token.len());
     let end = token
         .rfind(|c: char| c.is_alphanumeric())
-        .map_or(start, |i| i + token[i..].chars().next().map_or(1, char::len_utf8));
+        .map_or(start, |i| {
+            i + token[i..].chars().next().map_or(1, char::len_utf8)
+        });
 
     (&token[start..end], &token[..start], &token[end..])
 }
@@ -489,11 +484,15 @@ mod tests {
     #[test]
     fn preserves_pos_disambiguation() {
         assert!(
-            phonemize("I read the book yesterday").phonemes.contains("ɹˈɛd"),
+            phonemize("I read the book yesterday")
+                .phonemes
+                .contains("ɹˈɛd"),
             "past tense should be ɹˈɛd"
         );
         assert!(
-            phonemize("I will read the book tomorrow").phonemes.contains("ɹˈid"),
+            phonemize("I will read the book tomorrow")
+                .phonemes
+                .contains("ɹˈid"),
             "future should be ɹˈid"
         );
     }
@@ -589,10 +588,7 @@ mod tests {
     #[test]
     fn custom_mapping_extend() {
         let mut mapping = CustomMapping::new();
-        mapping.extend([
-            ("kubernetes", "kjˈubɚnɛtɪs"),
-            ("nginx", "ˈɛnʤənˈɛks"),
-        ]);
+        mapping.extend([("kubernetes", "kjˈubɚnɛtɪs"), ("nginx", "ˈɛnʤənˈɛks")]);
         assert_eq!(mapping.len(), 2);
         let out = phonemize_with_oov("kubernetes nginx", Some(&mapping));
         assert!(out.spelled_out.is_empty());
@@ -634,7 +630,10 @@ mod tests {
             }
         }
         let out = phonemize_with_oov("deployed to kubernetes", Some(&Stub));
-        assert!(out.spelled_out.is_empty(), "stub should handle all OOV words");
+        assert!(
+            out.spelled_out.is_empty(),
+            "stub should handle all OOV words"
+        );
         assert!(out.phonemes.contains("tˈɛst"), "got: {}", out.phonemes);
     }
 }

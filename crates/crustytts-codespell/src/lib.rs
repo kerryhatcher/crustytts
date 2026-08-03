@@ -65,7 +65,9 @@ impl CodespellDict {
     /// Look up a single word. Returns `Some(correction)` if the word is a
     /// known misspelling, or `None` if it's not in the dictionary.
     pub fn correct_word(&self, word: &str) -> Option<&str> {
-        self.corrections.get(&word.to_lowercase()).map(|s| s.as_str())
+        self.corrections
+            .get(&word.to_lowercase())
+            .map(|s| s.as_str())
     }
 
     /// Number of entries in the dictionary.
@@ -123,11 +125,7 @@ impl CodespellDict {
             if word.chars().all(|c| c.is_uppercase()) {
                 return correction.to_uppercase();
             }
-            if word
-                .chars()
-                .next()
-                .is_some_and(|c| c.is_uppercase())
-            {
+            if word.chars().next().is_some_and(|c| c.is_uppercase()) {
                 return titlecase_first(correction);
             }
             return correction.clone();
@@ -178,18 +176,15 @@ fn parse_dictionary(raw: &str) -> HashMap<String, String> {
         }
 
         // Take the first correction (before any comma)
-        let correction = corrections
-            .split(',')
-            .next()
-            .unwrap_or(corrections)
-            .trim();
+        let correction = corrections.split(',').next().unwrap_or(corrections).trim();
 
         if correction.is_empty() {
             continue;
         }
 
         // Only insert if we don't already have an entry (first wins)
-        map.entry(typo.to_lowercase()).or_insert_with(|| correction.to_string());
+        map.entry(typo.to_lowercase())
+            .or_insert_with(|| correction.to_string());
     }
 
     map
@@ -232,7 +227,11 @@ mod tests {
     #[test]
     fn full_dictionary_loads() {
         let dict = CodespellDict::load();
-        assert!(dict.len() > 60_000, "expected >60k entries, got {}", dict.len());
+        assert!(
+            dict.len() > 60_000,
+            "expected >60k entries, got {}",
+            dict.len()
+        );
     }
 
     #[test]

@@ -2,7 +2,7 @@
 
 **Local text-to-speech notifications for AI coding agents.**
 
-crustytts is a Claude Code Stop hook that reads the session transcript when Claude finishes a turn, summarizes what happened using a local Ollama model, and speaks the summary aloud via Kokoro TTS (82M-parameter neural model on ONNX Runtime).
+crustytts is a Claude Code and Codex Stop hook that summarizes the completed response using a local Ollama model and speaks it aloud via Kokoro TTS (82M-parameter neural model on ONNX Runtime).
 
 **No Python. No cloud services. No API keys.** Everything runs locally on your machine.
 
@@ -15,6 +15,9 @@ cargo install --path .
 # Configure the Claude Code Stop hook
 just setup
 
+# Or configure the Codex Stop hook
+crustytts --setup-codex
+
 # Test it
 just say "Hello, I am ready."
 ```
@@ -23,8 +26,8 @@ just say "Hello, I am ready."
 
 crustytts is a self-contained Rust binary that:
 
-1. **Hooks into Claude Code** via the Stop event — fires when Claude finishes a turn
-2. **Reads the session transcript** (JSONL format)
+1. **Hooks into Claude Code or Codex** via the Stop event — fires when the agent finishes a turn
+2. **Reads the Claude transcript** or Codex's stable `last_assistant_message` hook field
 3. **Summarizes** the last exchange using a local Ollama model
 4. **Synthesizes speech** via Kokoro ONNX TTS
 5. **Plays audio** through `aplay`
@@ -71,6 +74,9 @@ cargo run --release -- --proof "Text to proofread"
 # Configure the Claude Code hook
 just setup
 
+# Configure the Codex hook without replacing existing hooks
+just setup-codex
+
 # Install binary to PATH
 just install
 
@@ -109,6 +115,7 @@ The hooks use the `--transcript` flag to read a JSONL transcript file and run th
 | Tool | Transcript source | Filtering |
 |---|---|---|
 | **Claude Code** | Per-session JSONL file (path from stdin) | One file = one session, no filtering needed |
+| **Codex** | `last_assistant_message` from Stop hook stdin | No transcript parsing; Codex rollout JSONL is intentionally not treated as a stable interface |
 | **CherryPi** | Unified `~/.local/share/cherrypi/logs/chat.jsonl` | Filtered by `--cwd` — only entries matching the current working directory |
 
 ### Usage with Claude Code
@@ -116,6 +123,17 @@ The hooks use the `--transcript` flag to read a JSONL transcript file and run th
 ```bash
 claude --plugin-dir ./plugin
 ```
+
+### Usage with Codex
+
+```bash
+crustytts --setup-codex
+```
+
+This safely merges a crustytts `Stop` handler into `$CODEX_HOME/hooks.json` (or
+`~/.codex/hooks.json` when `CODEX_HOME` is unset) and preserves existing events
+and handlers. Start a new Codex session, run `/hooks`, and review and trust the
+new hook before it can run.
 
 ### Usage with CherryPi
 

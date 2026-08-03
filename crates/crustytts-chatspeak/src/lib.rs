@@ -103,11 +103,7 @@ impl ChatSpeakNormalizer {
                 return expanded.to_uppercase();
             }
             // If input was title-case, title-case the output
-            if word
-                .chars()
-                .next()
-                .is_some_and(|c| c.is_uppercase())
-            {
+            if word.chars().next().is_some_and(|c| c.is_uppercase()) {
                 return titlecase_first(expanded);
             }
             return expanded.to_string();

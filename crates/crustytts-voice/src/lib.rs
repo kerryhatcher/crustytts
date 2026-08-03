@@ -45,7 +45,10 @@ pub fn from_bytes(bytes: &[u8], style_dim: usize) -> Result<Voice, Error> {
         )));
     }
 
-    let rows = floats.chunks_exact(style_dim).map(<[f32]>::to_vec).collect();
+    let rows = floats
+        .chunks_exact(style_dim)
+        .map(<[f32]>::to_vec)
+        .collect();
 
     Ok(Voice { rows, style_dim })
 }

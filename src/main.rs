@@ -28,7 +28,6 @@
 ///   CLAUDE_TTS_VOICE            Kokoro voice id                (default: af_heart)
 ///   CRUSTYTTS_ONNX_MODEL        Path to Kokoro .onnx file      (auto-detected from HF cache)
 ///   CRUSTYTTS_VOICE             Path to a voice .bin file      (auto-detected from HF cache)
-
 use std::env;
 use std::fs::File;
 use std::io::{self, Read, Write};
@@ -133,9 +132,30 @@ fn log(msg: &str) {
 
 // ── JSON / transcript parsing ───────────────────────────────────────────────────
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Debug)]
 struct HookPayload {
     transcript_path: Option<String>,
+    /// Codex Stop hooks provide the completed response directly. Prefer this
+    /// stable field over parsing Codex's intentionally unstable transcript.
+    last_assistant_message: Option<String>,
+    hook_event_name: Option<String>,
+}
+
+fn codex_stop_message(payload: &HookPayload) -> Option<&str> {
+    if payload.hook_event_name.as_deref() != Some("Stop") {
+        return None;
+    }
+
+    payload
+        .last_assistant_message
+        .as_deref()
+        .map(str::trim)
+        .filter(|message| !message.is_empty())
+}
+
+fn codex_message_context(message: &str) -> String {
+    let truncated: String = message.chars().take(3000).collect();
+    format!("[Assistant]: {truncated}")
 }
 
 /// A single entry from the JSONL transcript. Fields are optional because the
@@ -185,7 +205,10 @@ fn load_jsonl(path: &str) -> Vec<TranscriptEntry> {
 /// Extract readable text from one transcript entry, tolerating format variations.
 fn text_from_entry(entry: &TranscriptEntry) -> String {
     // Claude Code sometimes wraps: {"type":"assistant","message":{"role":..,"content":..}}
-    let msg = entry.message.as_ref().map(|m| (m.role.as_deref(), m.content.as_ref()));
+    let msg = entry
+        .message
+        .as_ref()
+        .map(|m| (m.role.as_deref(), m.content.as_ref()));
     let (role, content) = match msg {
         Some((r, c)) => (r, c),
         None => (entry.role.as_deref(), entry.content.as_ref()),
@@ -434,9 +457,7 @@ fn speak_kokoro(text: &str) -> anyhow::Result<()> {
     });
 
     static OOV: OnceLock<OllamaOovPhonemizer> = OnceLock::new();
-    let oov = OOV.get_or_init(|| {
-        OllamaOovPhonemizer::new(spellcheck_model()).with_timeout(5)
-    });
+    let oov = OOV.get_or_init(|| OllamaOovPhonemizer::new(spellcheck_model()).with_timeout(5));
 
     // ── Custom phoneme mappings (loaded once from CRUSTYTTS_CUSTOM_PHONEMES) ──
     static CUSTOM_PHONEMES: OnceLock<Option<CustomMapping>> = OnceLock::new();
@@ -444,11 +465,16 @@ fn speak_kokoro(text: &str) -> anyhow::Result<()> {
         let env_path = std::env::var("CRUSTYTTS_CUSTOM_PHONEMES").ok()?;
         match CustomMapping::from_json_file(&env_path) {
             Ok(m) => {
-                log(&format!("  loaded {} custom phoneme mappings from {env_path:?}", m.len()));
+                log(&format!(
+                    "  loaded {} custom phoneme mappings from {env_path:?}",
+                    m.len()
+                ));
                 Some(m)
             }
             Err(e) => {
-                log(&format!("  failed to load custom phonemes from {env_path:?}: {e}"));
+                log(&format!(
+                    "  failed to load custom phonemes from {env_path:?}: {e}"
+                ));
                 None
             }
         }
@@ -472,12 +498,16 @@ fn speak_kokoro(text: &str) -> anyhow::Result<()> {
     let corrected = match spellcheck.correct_with_llm(&preprocessed) {
         Ok(c) => c,
         Err(e) => {
-            log(&format!("  spellcheck LLM failed ({e}), using dictionary-only"));
+            log(&format!(
+                "  spellcheck LLM failed ({e}), using dictionary-only"
+            ));
             spellcheck.correct(&preprocessed)
         }
     };
     if corrected != preprocessed {
-        log(&format!("  spellcheck: \"{preprocessed}\" -> \"{corrected}\""));
+        log(&format!(
+            "  spellcheck: \"{preprocessed}\" -> \"{corrected}\""
+        ));
     }
 
     let model_path = kokoro_model_path().context(
@@ -724,9 +754,9 @@ fn spellcheck_test(text: &str, use_llm: bool) {
 /// Uses the pluggable [`ProofingStage`] pipeline so each stage can be
 /// enabled, disabled, or reordered independently.
 fn proof_test(text: &str) {
+    use crustytts_chatspeak::ChatSpeakNormalizer;
     use crustytts_codespell::CodespellDict;
     use crustytts_core::ProofingStage;
-    use crustytts_chatspeak::ChatSpeakNormalizer;
     use crustytts_sentence::SentenceNormalizer;
     use crustytts_spellcheck::{GrammarChecker, HarperChecker, OllamaProvider, SpellChecker};
     use std::sync::OnceLock;
@@ -848,8 +878,7 @@ fn cherrypi_log_path() -> Option<String> {
     }
     // Fallback: $HOME/.local/share/cherrypi/logs/chat.jsonl (Linux)
     if let Ok(home) = env::var("HOME") {
-        let path = std::path::Path::new(&home)
-            .join(".local/share/cherrypi/logs/chat.jsonl");
+        let path = std::path::Path::new(&home).join(".local/share/cherrypi/logs/chat.jsonl");
         if path.is_file() {
             return Some(path.to_string_lossy().into());
         }
@@ -924,12 +953,164 @@ fn background_work(transcript_path: &str) {
     speak(&text);
 }
 
+fn background_message_work(message: &str) {
+    log("--- Codex stop hook fired | using last_assistant_message");
+    log(&format!(
+        "  message chars: {} | preview: {:.120?}",
+        message.len(),
+        message
+    ));
+
+    let context = codex_message_context(message);
+    let text = summarize(&context);
+    log(&format!("  speaking: {text:?}"));
+    speak(&text);
+}
+
 // ── setup ───────────────────────────────────────────────────────────────────────
 
 /// Path to the Claude Code settings file.
 fn settings_path() -> PathBuf {
     let home = env::var("HOME").unwrap_or_else(|_| "/home/kwhatcher".into());
     PathBuf::from(home).join(".claude/settings.json")
+}
+
+/// Path to the Codex user-level lifecycle hooks file.
+fn codex_hooks_path() -> PathBuf {
+    if let Some(codex_home) = env::var_os("CODEX_HOME") {
+        return PathBuf::from(codex_home).join("hooks.json");
+    }
+    let home = env::var("HOME").unwrap_or_else(|_| "/home/kwhatcher".into());
+    PathBuf::from(home).join(".codex/hooks.json")
+}
+
+/// Merge the canonical crustytts Stop handler into a Codex hooks document.
+///
+/// Existing events, matcher groups, and unrelated handlers are preserved.
+/// Imported Claude/CherryPi crustytts handlers are normalized for Codex.
+fn merge_codex_hook(root: &mut serde_json::Value) -> anyhow::Result<usize> {
+    const BIN_NAME: &str = "crustytts";
+
+    let hooks = root
+        .as_object_mut()
+        .context("hooks.json root is not an object")?
+        .entry("hooks")
+        .or_insert_with(|| serde_json::json!({}));
+
+    let stop_array = hooks
+        .as_object_mut()
+        .context("hooks.json 'hooks' is not an object")?
+        .entry("Stop")
+        .or_insert_with(|| serde_json::json!([]));
+
+    let entries = stop_array
+        .as_array_mut()
+        .context("hooks.json 'hooks.Stop' is not an array")?;
+
+    let mut matching_handlers = 0;
+    let mut changes = 0;
+
+    for entry in entries.iter_mut() {
+        let hook_list = match entry
+            .as_object_mut()
+            .and_then(|entry| entry.get_mut("hooks"))
+            .and_then(serde_json::Value::as_array_mut)
+        {
+            Some(hooks) => hooks,
+            None => continue,
+        };
+
+        for hook in hook_list.iter_mut() {
+            let Some(handler) = hook.as_object_mut() else {
+                continue;
+            };
+            if handler.get("type").and_then(serde_json::Value::as_str) != Some("command") {
+                continue;
+            }
+            let Some(command) = handler.get("command").and_then(serde_json::Value::as_str) else {
+                continue;
+            };
+            if !(command.contains("crustytts") || command.contains("claude-stop-tts")) {
+                continue;
+            }
+
+            matching_handlers += 1;
+            if command != BIN_NAME {
+                handler.insert("command".into(), BIN_NAME.into());
+                changes += 1;
+            }
+            if handler.remove("stdin_context").is_some() {
+                changes += 1;
+            }
+            if handler.get("timeout").and_then(serde_json::Value::as_u64) != Some(30) {
+                handler.insert("timeout".into(), 30.into());
+                changes += 1;
+            }
+        }
+    }
+
+    if matching_handlers == 0 {
+        entries.push(serde_json::json!({
+            "hooks": [
+                {"type": "command", "command": BIN_NAME, "timeout": 30}
+            ]
+        }));
+        changes += 1;
+    }
+
+    Ok(changes)
+}
+
+fn write_json_atomically(path: &std::path::Path, root: &serde_json::Value) -> anyhow::Result<()> {
+    let parent = path
+        .parent()
+        .with_context(|| format!("{} has no parent directory", path.display()))?;
+    std::fs::create_dir_all(parent)
+        .with_context(|| format!("cannot create {}", parent.display()))?;
+
+    let temp_path = parent.join(format!(".hooks.json.crustytts-{}.tmp", std::process::id()));
+    let result = (|| -> anyhow::Result<()> {
+        let out =
+            serde_json::to_string_pretty(root).context("failed to serialize Codex hooks.json")?;
+        std::fs::write(&temp_path, out + "\n")
+            .with_context(|| format!("cannot write {}", temp_path.display()))?;
+        std::fs::rename(&temp_path, path)
+            .with_context(|| format!("cannot replace {}", path.display()))?;
+        Ok(())
+    })();
+    if result.is_err() {
+        let _ = std::fs::remove_file(&temp_path);
+    }
+    result
+}
+
+fn setup_codex_hook() -> anyhow::Result<()> {
+    let path = codex_hooks_path();
+    let mut root = if path.exists() {
+        let data = std::fs::read_to_string(&path)
+            .with_context(|| format!("cannot read {}", path.display()))?;
+        serde_json::from_str(&data)
+            .with_context(|| format!("invalid JSON in {}", path.display()))?
+    } else {
+        serde_json::json!({"hooks": {}})
+    };
+
+    let changes = merge_codex_hook(&mut root)?;
+    if changes == 0 {
+        eprintln!(
+            "crustytts: Codex hook already configured in {}",
+            path.display()
+        );
+        return Ok(());
+    }
+
+    write_json_atomically(&path, &root)?;
+    eprintln!(
+        "crustytts: configured Codex Stop hook in {}",
+        path.display()
+    );
+    eprintln!("crustytts: open /hooks in Codex to review and trust the new hook");
+    Ok(())
 }
 
 /// Update ~/.claude/settings.json so the Stop hook points to `crustytts` on PATH.
@@ -1011,8 +1192,7 @@ fn setup_hook() -> anyhow::Result<()> {
         updated = 1;
     }
 
-    let out = serde_json::to_string_pretty(&root)
-        .context("failed to serialize settings.json")?;
+    let out = serde_json::to_string_pretty(&root).context("failed to serialize settings.json")?;
     std::fs::write(&path, out + "\n")
         .with_context(|| format!("cannot write {}", path.display()))?;
 
@@ -1058,9 +1238,25 @@ fn main() -> anyhow::Result<()> {
         return setup_hook();
     }
 
+    // ── Codex setup mode ────────────────────────────────────────────────────
+    if args.len() >= 2 && args[1] == "--setup-codex" {
+        return setup_codex_hook();
+    }
+
     // ── background mode ─────────────────────────────────────────────────────
     if args.len() >= 3 && args[1] == "--background" {
         background_work(&args[2]);
+        return Ok(());
+    }
+
+    // Codex messages travel over stdin so long responses are not exposed in
+    // process listings or constrained by command-line argument limits.
+    if args.len() >= 2 && args[1] == "--background-message" {
+        let mut message = String::new();
+        io::stdin().read_to_string(&mut message)?;
+        if !message.trim().is_empty() {
+            background_message_work(message.trim());
+        }
         return Ok(());
     }
 
@@ -1113,8 +1309,30 @@ fn main() -> anyhow::Result<()> {
     io::stdin().read_to_string(&mut raw)?;
     let raw = raw.trim();
 
-    // Try Claude Code protocol first: stdin has {"transcript_path": "..."}
+    // Codex provides the final response directly. Its transcript format is not
+    // a stable hook interface, so avoid parsing it when this field is present.
     if let Ok(payload) = serde_json::from_str::<HookPayload>(raw) {
+        if let Some(message) = codex_stop_message(&payload) {
+            let exe = env::current_exe().context("cannot determine own executable path")?;
+            let mut child = Command::new(exe)
+                .arg("--background-message")
+                .stdin(Stdio::piped())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .spawn()
+                .context("failed to spawn Codex background child")?;
+            child
+                .stdin
+                .take()
+                .context("Codex background child stdin was not piped")?
+                .write_all(message.as_bytes())
+                .context("failed to send message to Codex background child")?;
+
+            println!("{{\"continue\": true, \"suppressOutput\": true}}");
+            return Ok(());
+        }
+
+        // Claude Code protocol: stdin has {"transcript_path": "..."}.
         if let Some(ref transcript_path) = payload.transcript_path {
             if !transcript_path.is_empty() {
                 // Skip background/observer sessions (claude-mem, subagent summarizers)
@@ -1155,4 +1373,104 @@ fn main() -> anyhow::Result<()> {
     // Neither protocol matched — silently exit (flag day for old hooks without stdin_context)
     log("stdin: unrecognized payload — neither Claude Code nor CherryPi format");
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn codex_stop_message_uses_nonempty_final_message() {
+        let payload: HookPayload = serde_json::from_value(serde_json::json!({
+            "hook_event_name": "Stop",
+            "transcript_path": "/tmp/unstable-codex-rollout.jsonl",
+            "last_assistant_message": "  Finished all tests.  "
+        }))
+        .unwrap();
+
+        assert_eq!(codex_stop_message(&payload), Some("Finished all tests."));
+    }
+
+    #[test]
+    fn codex_stop_message_rejects_other_events_and_empty_messages() {
+        for value in [
+            serde_json::json!({
+                "hook_event_name": "SessionEnd",
+                "last_assistant_message": "Finished all tests."
+            }),
+            serde_json::json!({
+                "hook_event_name": "Stop",
+                "last_assistant_message": "   "
+            }),
+        ] {
+            let payload: HookPayload = serde_json::from_value(value).unwrap();
+            assert_eq!(codex_stop_message(&payload), None);
+        }
+    }
+
+    #[test]
+    fn codex_message_context_supports_the_offline_fallback() {
+        let context = codex_message_context("Finished all tests. Everything is ready.");
+        assert_eq!(naive_fallback(&context), "Finished all tests.");
+    }
+
+    #[test]
+    fn codex_setup_preserves_existing_hooks() {
+        let mut root = serde_json::json!({
+            "description": "existing user hooks",
+            "hooks": {
+                "SessionStart": [{
+                    "hooks": [{"type": "command", "command": "session-notes"}]
+                }],
+                "Stop": [{
+                    "hooks": [{
+                        "type": "command",
+                        "command": "if test -x /opt/orca-hook; then /opt/orca-hook; fi",
+                        "timeout": 10
+                    }]
+                }]
+            }
+        });
+        let original_orca = root["hooks"]["Stop"][0].clone();
+
+        assert_eq!(merge_codex_hook(&mut root).unwrap(), 1);
+        assert_eq!(root["description"], "existing user hooks");
+        assert_eq!(root["hooks"]["Stop"][0], original_orca);
+        assert_eq!(root["hooks"]["Stop"][1]["hooks"][0]["command"], "crustytts");
+        assert_eq!(root["hooks"]["Stop"][1]["hooks"][0]["timeout"], 30);
+
+        let once = root.clone();
+        assert_eq!(merge_codex_hook(&mut root).unwrap(), 0);
+        assert_eq!(root, once);
+    }
+
+    #[test]
+    fn codex_setup_normalizes_imported_crustytts_hook() {
+        let mut root = serde_json::json!({
+            "hooks": {
+                "Stop": [{
+                    "matcher": "",
+                    "hooks": [{
+                        "type": "command",
+                        "command": "/old/path/claude-stop-tts",
+                        "stdin_context": true,
+                        "statusMessage": "Speaking"
+                    }]
+                }]
+            }
+        });
+
+        assert_eq!(merge_codex_hook(&mut root).unwrap(), 3);
+        let handler = &root["hooks"]["Stop"][0]["hooks"][0];
+        assert_eq!(handler["command"], "crustytts");
+        assert_eq!(handler["timeout"], 30);
+        assert_eq!(handler["statusMessage"], "Speaking");
+        assert!(handler.get("stdin_context").is_none());
+    }
+
+    #[test]
+    fn codex_setup_rejects_malformed_hook_shapes() {
+        let mut root = serde_json::json!({"hooks": []});
+        assert!(merge_codex_hook(&mut root).is_err());
+    }
 }
