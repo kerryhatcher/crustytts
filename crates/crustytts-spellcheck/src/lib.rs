@@ -10,18 +10,25 @@
 //!    one edit. If exactly one unique candidate is in the dictionary, it is a
 //!    *high-confidence* correction.
 //! 3. **LLM verification** — when edit distance is ambiguous, an optional
-//!    [`LlmProvider`] examines the surrounding sentence context.
+//!    [`LlmProvider`] examines the surrounding sentence context. The trait is
+//!    transport-agnostic, so you can implement it over whatever HTTP client you
+//!    already have; enable `ollama` for the bundled `OllamaProvider`.
 //! 4. **Grammar checking** — after spell correction, an optional
 //!    [`GrammarChecker`] applies rule-based grammar fixes. Enable `nlprule`
 //!    (LanguageTool rules) or `harper` (Harper grammar engine).
 //!
 //! # Features
 //!
-//! - `full` (default) — enables `symspell`, `spellbook`, `nlprule`, `harper`
+//! - `full` (default) — enables `symspell`, `spellbook`, `nlprule`, `harper`,
+//!   `ollama`
 //! - `symspell` — frequency-weighted symmetric-delete spelling
 //! - `spellbook` — Hunspell-compatible dictionary with affix rules
 //! - `nlprule` — rule-based grammar checking via LanguageTool
 //! - `harper` — modern grammar + spelling engine from Automattic
+//! - `ollama` — `OllamaProvider`, an [`LlmProvider`] backed by a local Ollama
+//!   server. The only feature that pulls in an HTTP client (`reqwest`, and with
+//!   it `serde`/`serde_json`), so leave it off if you implement [`LlmProvider`]
+//!   yourself — the rest of the crate needs no I/O.
 //!
 //! # Example
 //!

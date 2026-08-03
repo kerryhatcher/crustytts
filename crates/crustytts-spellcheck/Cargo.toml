@@ -14,7 +14,7 @@ full = ["symspell", "spellbook", "nlprule", "harper", "ollama"]
 
 # Ollama-backed LlmProvider. Only this pulls in an HTTP client; implement
 # LlmProvider yourself to use the verification stage without reqwest.
-ollama = ["dep:reqwest"]
+ollama = ["dep:reqwest", "dep:serde", "dep:serde_json"]
 
 # Frequency-weighted symmetric-delete spelling correction.
 symspell = ["dep:symspell"]
@@ -29,8 +29,10 @@ nlprule = ["dep:nlprule"]
 harper = ["dep:harper-core"]
 
 [dependencies]
-serde.workspace = true
-serde_json.workspace = true
+# Only the Ollama provider serialises requests and parses JSON responses, so
+# these ride along with that feature rather than being unconditional.
+serde = { workspace = true, optional = true }
+serde_json = { workspace = true, optional = true }
 reqwest = { workspace = true, optional = true }
 symspell = { workspace = true, optional = true }
 spellbook = { workspace = true, optional = true }
