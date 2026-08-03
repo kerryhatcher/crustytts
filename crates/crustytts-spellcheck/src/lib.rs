@@ -37,6 +37,8 @@
 use std::collections::HashSet;
 use std::sync::OnceLock;
 
+// Only the Ollama provider and its response parsers derive Deserialize.
+#[cfg(feature = "ollama")]
 use serde::Deserialize;
 
 // ── traits ──────────────────────────────────────────────────────────────────────
@@ -297,13 +299,20 @@ impl GrammarChecker for HarperChecker {
 }
 
 // ── Ollama LLM provider ─────────────────────────────────────────────────────────
+//
+// The only implementation in this crate that speaks HTTP, hence the only reason
+// to pull in `reqwest`. `LlmProvider` itself is transport-agnostic, so a consumer
+// that already has an HTTP client can implement it directly and skip this
+// feature entirely.
 
+#[cfg(feature = "ollama")]
 pub struct OllamaProvider {
     model: String,
     endpoint: String,
     timeout_secs: u64,
 }
 
+#[cfg(feature = "ollama")]
 impl OllamaProvider {
     pub fn new(model: impl Into<String>) -> Self {
         Self {
@@ -324,6 +333,7 @@ impl OllamaProvider {
     }
 }
 
+#[cfg(feature = "ollama")]
 impl LlmProvider for OllamaProvider {
     fn review_words(&self, text: &str, words: &[&str]) -> Result<Vec<Option<String>>, String> {
         if words.is_empty() {
@@ -846,7 +856,12 @@ fn apply_corrections(text: &str, issues: &[SpellIssue]) -> String {
 }
 
 // ── LLM response parsing ────────────────────────────────────────────────────────
+//
+// Only reachable from OllamaProvider, so gated with it. A hand-rolled
+// LlmProvider returns Rust values directly and never needs to parse Ollama's
+// JSON envelope.
 
+#[cfg(feature = "ollama")]
 #[derive(Deserialize)]
 struct LlmSuggestion {
     index: usize,
@@ -855,6 +870,7 @@ struct LlmSuggestion {
     correction: Option<String>,
 }
 
+#[cfg(feature = "ollama")]
 fn parse_llm_spelling_response(json: &str, count: usize) -> Result<Vec<Option<String>>, String> {
     let json = json.trim();
     let json = json
@@ -882,12 +898,14 @@ fn parse_llm_spelling_response(json: &str, count: usize) -> Result<Vec<Option<St
     Ok(result)
 }
 
+#[cfg(feature = "ollama")]
 #[derive(Deserialize)]
 struct ProposalDecision {
     index: usize,
     action: String,
 }
 
+#[cfg(feature = "ollama")]
 fn parse_proposal_decisions(json: &str, count: usize) -> Result<Vec<bool>, String> {
     let json = json.trim();
     let json = json
