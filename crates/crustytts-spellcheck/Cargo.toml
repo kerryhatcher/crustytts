@@ -10,7 +10,11 @@ categories = ["text-processing"]
 
 [features]
 default = ["full"]
-full = ["symspell", "spellbook", "nlprule", "harper"]
+full = ["symspell", "spellbook", "nlprule", "harper", "ollama"]
+
+# Ollama-backed LlmProvider. Only this pulls in an HTTP client; implement
+# LlmProvider yourself to use the verification stage without reqwest.
+ollama = ["dep:reqwest"]
 
 # Frequency-weighted symmetric-delete spelling correction.
 symspell = ["dep:symspell"]
@@ -27,7 +31,7 @@ harper = ["dep:harper-core"]
 [dependencies]
 serde.workspace = true
 serde_json.workspace = true
-reqwest.workspace = true
+reqwest = { workspace = true, optional = true }
 symspell = { workspace = true, optional = true }
 spellbook = { workspace = true, optional = true }
 nlprule = { workspace = true, optional = true }
