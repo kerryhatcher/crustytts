@@ -10,3 +10,5 @@ categories = ["multimedia::audio"]
 
 [dependencies]
 crustytts-core.workspace = true
+ogg.workspace = true
+opus.workspace = true

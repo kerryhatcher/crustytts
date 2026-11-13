@@ -409,18 +409,85 @@ fn speak(text: &str) {
     }
 }
 
+/// Synthesize `text` with Kokoro and play it through `aplay`.
+fn speak_kokoro(text: &str) -> anyhow::Result<()> {
+    use crustytts_core::AudioSink;
+    use crustytts_sink::AplaySink;
+
+    let audio = synthesize_kokoro(text)?;
+    AplaySink::new().play(&audio)?;
+    Ok(())
+}
+
+/// `crustytts --say [--output FILE] [--ogg-bitrate KBPS] <text...>`
+///
+/// Without `--output` the speech is played through `aplay`. With it, the speech
+/// is written to FILE (`.wav` or `.ogg`) and not played, so a headless job can
+/// generate clips for later. Unlike the hook path, failures are returned, so the
+/// exit code says whether audio was produced.
+fn say(args: &[String]) -> anyhow::Result<()> {
+    let mut output: Option<PathBuf> = None;
+    let mut opts = crustytts_sink::EncodeOptions::default();
+    let mut words: Vec<&str> = Vec::new();
+
+    let mut rest = args.iter();
+    while let Some(arg) = rest.next() {
+        match arg.as_str() {
+            "--output" => {
+                let path = rest.next().context("--output needs a file path")?;
+                output = Some(PathBuf::from(path));
+            }
+            "--ogg-bitrate" => {
+                let value = rest
+                    .next()
+                    .context("--ogg-bitrate needs a value in kbit/s")?;
+                opts.ogg_bitrate_kbps = value
+                    .parse()
+                    .with_context(|| format!("--ogg-bitrate: not a whole number: {value}"))?;
+            }
+            _ => words.push(arg),
+        }
+    }
+
+    let text = words.join(" ");
+    anyhow::ensure!(
+        !text.is_empty(),
+        "usage: crustytts --say [--output FILE] [--ogg-bitrate KBPS] <text>"
+    );
+
+    match output {
+        Some(path) => {
+            // Check the extension before loading the model, so a typo fails fast.
+            crustytts_sink::FileFormat::from_path(&path)?;
+            let audio = synthesize_kokoro(&text)?;
+            crustytts_sink::write_file(&audio, &path, opts)?;
+            eprintln!(
+                "wrote {} ({:.2}s at {} Hz)",
+                path.display(),
+                audio.duration_secs(),
+                audio.sample_rate
+            );
+        }
+        None => {
+            // Serialize with other speakers, as the hook path does.
+            let _lock = acquire_speaker_lock();
+            speak_kokoro(&text)?;
+        }
+    }
+    Ok(())
+}
+
 /// Synthesize with Kokoro: spellcheck → phonemes (with custom mapping + OOV LLM) → tokens → audio.
 ///
 /// Custom phoneme mappings are loaded from `CRUSTYTTS_CUSTOM_PHONEMES` env var (JSON file).
 /// When set, those mappings are checked before the OOV LLM handler.
-fn speak_kokoro(text: &str) -> anyhow::Result<()> {
+fn synthesize_kokoro(text: &str) -> anyhow::Result<crustytts_core::Audio> {
     use crustytts_chatspeak::ChatSpeakNormalizer;
     use crustytts_codespell::CodespellDict;
-    use crustytts_core::{AudioSink, OovPhonemizer, ProofingPipeline, Synthesizer, Tokenizer};
+    use crustytts_core::{OovPhonemizer, ProofingPipeline, Synthesizer, Tokenizer};
     use crustytts_kokoro::KokoroOnnx;
     use crustytts_phonemize::{phonemize_with_oov, CustomMapping, OllamaOovPhonemizer};
     use crustytts_sentence::SentenceNormalizer;
-    use crustytts_sink::AplaySink;
     use crustytts_spellcheck::{OllamaProvider, SpellChecker};
     use crustytts_tokenizer::KokoroTokenizer;
     use crustytts_voice::load_voice;
@@ -539,8 +606,7 @@ fn speak_kokoro(text: &str) -> anyhow::Result<()> {
         audio.duration_secs()
     ));
 
-    AplaySink::new().play(&audio)?;
-    Ok(())
+    Ok(audio)
 }
 
 // ── Spelled-out word logger ─────────────────────────────────────────────────────
@@ -1207,9 +1273,7 @@ fn main() -> anyhow::Result<()> {
 
     // ── say mode (test TTS directly) ─────────────────────────────────────────
     if args.len() >= 3 && args[1] == "--say" {
-        let text = args[2..].join(" ");
-        speak(&text);
-        return Ok(());
+        return say(&args[2..]);
     }
 
     // ── spellcheck mode (test spellchecker) ──────────────────────────────────

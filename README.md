@@ -51,7 +51,8 @@ Heteronyms resolve by grammatical role ("I read it yesterday" → /ɹɛd/, "I wi
 - **crustytts binary** installed on PATH (`just setup` handles this)
 - **Kokoro ONNX model** — `onnx-community/Kokoro-82M-v1.0-ONNX` from HuggingFace (auto-detected)
 - **Ollama** running locally (defaults: `qwen3:8b` for summarization, `qwen3:0.6b` for spellcheck)
-- **aplay** (ALSA) for audio output on Linux
+- **aplay** (ALSA) for audio output on Linux (not needed with `--output`)
+- **cmake** and a C compiler to build the bundled libopus used for Ogg output
 
 ## Commands
 
@@ -61,6 +62,10 @@ just run
 
 # Speak arbitrary text (bypasses transcript + Ollama)
 just say "Your text here"
+
+# Write speech to a file instead of playing it (format from the extension: .wav or .ogg)
+crustytts --say --output speech.wav "Your text here"
+crustytts --say --output speech.ogg --ogg-bitrate 48 "Your text here"
 
 # Summarize and speak a transcript file
 cargo run --release -- --transcript ~/.local/share/cherrypi/logs/chat.jsonl --cwd /path/to/project
@@ -197,7 +202,7 @@ crustytts is a Rust workspace with modular crates:
 | `crustytts-tokenizer` | Kokoro phoneme tokenizer |
 | `crustytts-phonemize` | Misaki phonemizer with OOV LLM fallback |
 | `crustytts-voice` | Voice embedding loader |
-| `crustytts-sink` | Audio playback (aplay) |
+| `crustytts-sink` | Audio playback (aplay) and file output (WAV, Ogg/Opus) |
 | `crustytts-normalize` | Text normalization |
 | `crustytts-sentence` | Sentence boundary detection |
 | `crustytts-summarize` | LLM summarization client |
