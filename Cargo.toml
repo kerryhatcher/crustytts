@@ -27,6 +27,8 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 anyhow = "1"
 fs2 = "0.4"
+ogg = "0.9"
+opus = "0.4"
 reqwest = { version = "0.12", features = ["blocking", "json"] }
 ort = { version = "=2.0.0-rc.10" }
 tokenizers = "0.21"

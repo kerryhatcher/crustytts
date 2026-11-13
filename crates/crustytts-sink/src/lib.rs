@@ -2,7 +2,13 @@
 //!
 //! [`AplaySink`] plays through ALSA's `aplay` — works on any Linux box without
 //! linking an audio library. [`CaptureSink`] collects audio in memory for
-//! tests or file output.
+//! tests. [`write_file`] saves audio as WAV or Ogg/Opus, picked by extension.
+
+mod file;
+
+pub use file::{
+    encode_ogg_opus, encode_wav, write_file, EncodeOptions, FileFormat, DEFAULT_OGG_BITRATE_KBPS,
+};
 
 use std::io::Write;
 use std::process::{Command, Stdio};
