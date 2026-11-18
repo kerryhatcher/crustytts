@@ -8,6 +8,7 @@
 //! available here, and Opus in Ogg is a standard container (RFC 7845).
 
 use std::io;
+use std::ops::RangeInclusive;
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -27,6 +28,9 @@ const MAX_PACKET_BYTES: usize = 4000;
 
 /// Default Opus bitrate. Mono speech is transparent at this rate.
 pub const DEFAULT_OGG_BITRATE_KBPS: u32 = 64;
+
+/// Opus bitrates the encoder accepts, in kbit/s.
+pub const OGG_BITRATE_RANGE_KBPS: RangeInclusive<u32> = 6..=510;
 
 /// Output container, inferred from the file extension.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -56,7 +60,7 @@ impl FileFormat {
 /// Encoder settings for file output.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct EncodeOptions {
-    /// Opus target bitrate in kbit/s, between 6 and 510. Ignored for WAV.
+    /// Opus target bitrate in kbit/s, within [`OGG_BITRATE_RANGE_KBPS`]. Ignored for WAV.
     pub ogg_bitrate_kbps: u32,
 }
 
@@ -115,22 +119,32 @@ pub fn encode_wav(audio: &Audio) -> Result<Vec<u8>, Error> {
     Ok(out)
 }
 
+/// Check that Ogg Opus can encode `sample_rate` audio at `bitrate_kbps`.
+///
+/// Callers can run this before synthesis, so bad settings fail before a model loads.
+pub fn check_ogg_settings(sample_rate: u32, bitrate_kbps: u32) -> Result<(), Error> {
+    if !OPUS_RATES.contains(&sample_rate) {
+        return Err(Error::Audio(format!(
+            "Ogg Opus needs 8, 12, 16, 24 or 48 kHz audio, got {sample_rate} Hz"
+        )));
+    }
+    if !OGG_BITRATE_RANGE_KBPS.contains(&bitrate_kbps) {
+        return Err(Error::Audio(format!(
+            "Opus bitrate must be {}–{} kbit/s, got {bitrate_kbps}",
+            OGG_BITRATE_RANGE_KBPS.start(),
+            OGG_BITRATE_RANGE_KBPS.end()
+        )));
+    }
+    Ok(())
+}
+
 /// Encode as Opus inside an Ogg container (RFC 7845), mono, at `bitrate_kbps`.
 ///
 /// The input rate must be one libopus accepts (8, 12, 16, 24 or 48 kHz).
 /// Silent input still yields one valid frame, so the stream always ends properly.
 pub fn encode_ogg_opus(audio: &Audio, bitrate_kbps: u32) -> Result<Vec<u8>, Error> {
     let rate = audio.sample_rate;
-    if !OPUS_RATES.contains(&rate) {
-        return Err(Error::Audio(format!(
-            "Ogg Opus needs 8, 12, 16, 24 or 48 kHz audio, got {rate} Hz"
-        )));
-    }
-    if !(6..=510).contains(&bitrate_kbps) {
-        return Err(Error::Audio(format!(
-            "Opus bitrate must be 6–510 kbit/s, got {bitrate_kbps}"
-        )));
-    }
+    check_ogg_settings(rate, bitrate_kbps)?;
 
     let mut encoder = opus::Encoder::new(rate, opus::Channels::Mono, opus::Application::Audio)
         .map_err(opus_err)?;
@@ -148,6 +162,8 @@ pub fn encode_ogg_opus(audio: &Audio, bitrate_kbps: u32) -> Result<Vec<u8>, Erro
     // the last real sample has come out. Always at least one frame, so silent
     // or empty input still has audio packets.
     let frames = (total + lookahead).div_ceil(frame_len).max(1);
+    // Final granule: pre-skip plus the real length. Decoders trim the padding.
+    let final_granule = pre_skip as u64 + total as u64 * OPUS_GRANULE_RATE / rate as u64;
 
     let serial = stream_serial();
     let mut out = Vec::new();
@@ -175,13 +191,17 @@ pub fn encode_ogg_opus(audio: &Audio, bitrate_kbps: u32) -> Result<Vec<u8>, Erro
                 .encode_float(&frame, &mut packet)
                 .map_err(opus_err)?;
 
-            // Granule position: samples decoded so far, plus pre-skip. The final
-            // packet stops at the real length, so padding is trimmed on decode.
-            let granule = pre_skip as u64 + end as u64 * OPUS_GRANULE_RATE / rate as u64;
-            let info = if i + 1 == frames {
-                ogg::PacketWriteEndInfo::EndStream
+            // RFC 7845 §4.3: PCM position = granule − pre-skip. So a page's granule
+            // counts every decoded sample up to the end of its last packet, pre-skip
+            // included. Only the final page subtracts the padding it carries.
+            let (granule, info) = if i + 1 == frames {
+                (final_granule, ogg::PacketWriteEndInfo::EndStream)
             } else {
-                ogg::PacketWriteEndInfo::NormalPacket
+                let decoded = ((i + 1) * frame_len) as u64 * OPUS_GRANULE_RATE / rate as u64;
+                (
+                    decoded.min(final_granule),
+                    ogg::PacketWriteEndInfo::NormalPacket,
+                )
             };
             w.write_packet(packet[..n].to_vec(), serial, info, granule)
                 .map_err(io_err)?;
@@ -365,6 +385,140 @@ mod tests {
         // Nothing to play: the granule is pre-skip alone.
         let pre_skip = last_granule.unwrap();
         assert!(pre_skip < 48_000 / 100);
+    }
+
+    /// What the granule tests need from one decoded Ogg Opus packet.
+    struct Seen {
+        /// Decoder output through this packet, counted at 48 kHz, pre-skip included.
+        decoded_48k: u64,
+        granule: u64,
+        last_in_page: bool,
+        last_in_stream: bool,
+    }
+
+    /// Decode an Ogg Opus stream. Returns the pre-skip, every decoded sample at
+    /// `rate`, and one `Seen` per packet.
+    fn decode_stream(bytes: Vec<u8>, rate: u32) -> (usize, Vec<f32>, Vec<Seen>) {
+        let mut reader = ogg::PacketReader::new(Cursor::new(bytes));
+        let head = reader.read_packet_expected().unwrap();
+        assert_eq!(&head.data[0..8], b"OpusHead");
+        let pre_skip = u16::from_le_bytes([head.data[10], head.data[11]]) as usize;
+        let tags = reader.read_packet_expected().unwrap();
+        assert_eq!(&tags.data[0..8], b"OpusTags");
+
+        let mut decoder = opus::Decoder::new(rate, opus::Channels::Mono).unwrap();
+        let mut buf = vec![0f32; 5760];
+        let mut samples = Vec::new();
+        let mut seen = Vec::new();
+        while let Some(packet) = reader.read_packet().unwrap() {
+            let n = decoder.decode_float(&packet.data, &mut buf, false).unwrap();
+            samples.extend_from_slice(&buf[..n]);
+            seen.push(Seen {
+                decoded_48k: samples.len() as u64 * 48_000 / rate as u64,
+                granule: packet.absgp_page(),
+                last_in_page: packet.last_in_page(),
+                last_in_stream: packet.last_in_stream(),
+            });
+        }
+        (pre_skip, samples, seen)
+    }
+
+    /// Encode a 1 s tone at `rate`, decode it, and check the end and the level.
+    fn round_trips_at(rate: u32) {
+        let audio = tone(rate, 1.0, 0.5);
+        let (pre_skip, decoded, seen) = decode_stream(encode_ogg_opus(&audio, 64).unwrap(), rate);
+
+        let last = seen.last().expect("at least one audio packet");
+        assert!(last.last_in_stream, "stream must end with end-of-stream");
+        let n = audio.samples.len() as u64;
+        assert_eq!(last.granule, pre_skip as u64 + n * 48_000 / rate as u64);
+
+        let start = pre_skip * rate as usize / 48_000;
+        let body = &decoded[start..start + audio.samples.len()];
+        let expected = 0.5 / 2f32.sqrt();
+        let got = rms(body);
+        assert!(
+            (got - expected).abs() < expected * 0.1,
+            "{rate} Hz: rms {got} should be close to {expected}"
+        );
+    }
+
+    #[test]
+    fn ogg_round_trips_at_every_opus_rate() {
+        for rate in [8_000, 16_000, 48_000] {
+            round_trips_at(rate);
+        }
+    }
+
+    #[test]
+    fn granules_count_decoded_samples_on_every_page() {
+        // A page holds up to 255 packets (~5 s here), so 30 s spans several pages
+        // and the mid-stream granules are checked too.
+        let rate = 24_000;
+        let audio = tone(rate, 30.0, 0.5);
+        let (pre_skip, _, seen) = decode_stream(encode_ogg_opus(&audio, 64).unwrap(), rate);
+
+        let pages: Vec<&Seen> = seen.iter().filter(|p| p.last_in_page).collect();
+        assert!(
+            pages.len() > 3,
+            "expected several pages, got {}",
+            pages.len()
+        );
+        for p in pages.iter().filter(|p| !p.last_in_stream) {
+            // RFC 7845 §4.3: PCM position = granule − pre-skip, so the granule must
+            // equal every decoded sample up to the end of the page.
+            assert_eq!(
+                p.granule, p.decoded_48k,
+                "mid-stream page granule must count decoded samples"
+            );
+        }
+
+        let last = seen.last().unwrap();
+        assert!(last.last_in_stream);
+        assert_eq!(
+            last.granule,
+            pre_skip as u64 + 2 * audio.samples.len() as u64
+        );
+    }
+
+    #[test]
+    fn write_file_picks_the_format_from_the_extension() {
+        let dir = std::env::temp_dir().join(format!("crustytts-sink-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let audio = tone(24_000, 0.5, 0.5);
+
+        let wav = dir.join("clip.WAV");
+        write_file(&audio, &wav, EncodeOptions::default()).unwrap();
+        assert_eq!(&std::fs::read(&wav).unwrap()[0..4], b"RIFF");
+
+        let ogg_path = dir.join("clip.ogg");
+        write_file(
+            &audio,
+            &ogg_path,
+            EncodeOptions {
+                ogg_bitrate_kbps: 32,
+            },
+        )
+        .unwrap();
+        assert_eq!(&std::fs::read(&ogg_path).unwrap()[0..4], b"OggS");
+
+        let bad = dir.join("clip.mp3");
+        assert!(write_file(&audio, &bad, EncodeOptions::default()).is_err());
+        assert!(!bad.exists(), "nothing is written for an unknown extension");
+
+        let missing = dir.join("no-such-dir").join("clip.wav");
+        assert!(write_file(&audio, &missing, EncodeOptions::default()).is_err());
+
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn settings_are_checked_before_encoding() {
+        assert!(check_ogg_settings(24_000, 64).is_ok());
+        assert!(check_ogg_settings(48_000, 510).is_ok());
+        assert!(check_ogg_settings(22_050, 64).is_err());
+        assert!(check_ogg_settings(24_000, 5).is_err());
+        assert!(check_ogg_settings(24_000, 511).is_err());
     }
 
     #[test]

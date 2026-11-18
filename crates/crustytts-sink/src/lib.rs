@@ -7,7 +7,8 @@
 mod file;
 
 pub use file::{
-    encode_ogg_opus, encode_wav, write_file, EncodeOptions, FileFormat, DEFAULT_OGG_BITRATE_KBPS,
+    check_ogg_settings, encode_ogg_opus, encode_wav, write_file, EncodeOptions, FileFormat,
+    DEFAULT_OGG_BITRATE_KBPS, OGG_BITRATE_RANGE_KBPS,
 };
 
 use std::io::Write;
