@@ -409,18 +409,164 @@ fn speak(text: &str) {
     }
 }
 
+/// Synthesize `text` with Kokoro and play it through `aplay`.
+fn speak_kokoro(text: &str) -> anyhow::Result<()> {
+    use crustytts_core::AudioSink;
+    use crustytts_sink::AplaySink;
+
+    let audio = synthesize_kokoro(text)?;
+    AplaySink::new().play(&audio)?;
+    Ok(())
+}
+
+const SAY_USAGE: &str =
+    "usage: crustytts --say [--output FILE.wav|FILE.ogg] [--ogg-bitrate KBPS] [--] <text>";
+
+/// Parsed `crustytts --say` arguments.
+#[derive(Debug, PartialEq)]
+struct SayArgs {
+    text: String,
+    /// Where to write the speech. `None` plays it through `aplay`.
+    output: Option<PathBuf>,
+    /// Explicit `--ogg-bitrate`. `None` keeps the encoder default.
+    ogg_bitrate_kbps: Option<u32>,
+}
+
+/// Parse and check `--say` arguments.
+///
+/// Everything that can be checked without the model is checked here, so a bad
+/// command fails before a Kokoro model is loaded. Unknown `--` options are
+/// errors rather than speech, so a typo can't make the command play text
+/// instead of writing a file. `--` ends option parsing, so text may start
+/// with `--`.
+fn parse_say_args(args: &[String]) -> anyhow::Result<SayArgs> {
+    let mut output: Option<PathBuf> = None;
+    let mut ogg_bitrate_kbps: Option<u32> = None;
+    let mut words: Vec<&str> = Vec::new();
+
+    let mut rest = args.iter().map(String::as_str);
+    while let Some(arg) = rest.next() {
+        match arg {
+            "--" => {
+                words.extend(rest.by_ref());
+                break;
+            }
+            "--output" => {
+                anyhow::ensure!(output.is_none(), "--output given more than once");
+                let path = rest
+                    .next()
+                    .filter(|p| !p.starts_with("--"))
+                    .context("--output needs a file path")?;
+                output = Some(PathBuf::from(path));
+            }
+            "--ogg-bitrate" => {
+                anyhow::ensure!(
+                    ogg_bitrate_kbps.is_none(),
+                    "--ogg-bitrate given more than once"
+                );
+                let value = rest
+                    .next()
+                    .filter(|v| !v.starts_with("--"))
+                    .context("--ogg-bitrate needs a value in kbit/s")?;
+                ogg_bitrate_kbps = Some(
+                    value
+                        .parse()
+                        .with_context(|| format!("--ogg-bitrate: not a whole number: {value}"))?,
+                );
+            }
+            flag if flag.starts_with("--") => {
+                anyhow::bail!("unknown option {flag}\n{SAY_USAGE}");
+            }
+            word => words.push(word),
+        }
+    }
+
+    let text = words.join(" ");
+    anyhow::ensure!(!text.is_empty(), "no text to speak\n{SAY_USAGE}");
+
+    match &output {
+        Some(path) => {
+            let format = crustytts_sink::FileFormat::from_path(path)?;
+            if let Some(dir) = path.parent().filter(|d| !d.as_os_str().is_empty()) {
+                anyhow::ensure!(
+                    dir.is_dir(),
+                    "output directory {} does not exist",
+                    dir.display()
+                );
+            }
+            match format {
+                crustytts_sink::FileFormat::Ogg => {
+                    // The sample rate is Kokoro's fixed output rate, so it is known now.
+                    crustytts_sink::check_ogg_settings(
+                        crustytts_kokoro::SAMPLE_RATE,
+                        ogg_bitrate_kbps.unwrap_or(crustytts_sink::DEFAULT_OGG_BITRATE_KBPS),
+                    )?;
+                }
+                crustytts_sink::FileFormat::Wav => {
+                    anyhow::ensure!(
+                        ogg_bitrate_kbps.is_none(),
+                        "--ogg-bitrate only applies to .ogg output"
+                    );
+                }
+            }
+        }
+        None => anyhow::ensure!(
+            ogg_bitrate_kbps.is_none(),
+            "--ogg-bitrate needs --output FILE.ogg"
+        ),
+    }
+
+    Ok(SayArgs {
+        text,
+        output,
+        ogg_bitrate_kbps,
+    })
+}
+
+/// `crustytts --say [--output FILE] [--ogg-bitrate KBPS] [--] <text...>`
+///
+/// Without `--output` the speech is played through `aplay`. With it, the speech
+/// is written to FILE (`.wav` or `.ogg`) and not played, so a headless job can
+/// generate clips for later. Unlike the hook path, failures are returned, so the
+/// exit code says whether audio was produced.
+fn say(args: &[String]) -> anyhow::Result<()> {
+    let args = parse_say_args(args)?;
+    match args.output {
+        Some(path) => {
+            let opts = crustytts_sink::EncodeOptions {
+                ogg_bitrate_kbps: args
+                    .ogg_bitrate_kbps
+                    .unwrap_or(crustytts_sink::DEFAULT_OGG_BITRATE_KBPS),
+            };
+            let audio = synthesize_kokoro(&args.text)?;
+            crustytts_sink::write_file(&audio, &path, opts)?;
+            eprintln!(
+                "wrote {} ({:.2}s at {} Hz)",
+                path.display(),
+                audio.duration_secs(),
+                audio.sample_rate
+            );
+        }
+        None => {
+            // Serialize with other speakers, as the hook path does.
+            let _lock = acquire_speaker_lock();
+            speak_kokoro(&args.text)?;
+        }
+    }
+    Ok(())
+}
+
 /// Synthesize with Kokoro: spellcheck → phonemes (with custom mapping + OOV LLM) → tokens → audio.
 ///
 /// Custom phoneme mappings are loaded from `CRUSTYTTS_CUSTOM_PHONEMES` env var (JSON file).
 /// When set, those mappings are checked before the OOV LLM handler.
-fn speak_kokoro(text: &str) -> anyhow::Result<()> {
+fn synthesize_kokoro(text: &str) -> anyhow::Result<crustytts_core::Audio> {
     use crustytts_chatspeak::ChatSpeakNormalizer;
     use crustytts_codespell::CodespellDict;
-    use crustytts_core::{AudioSink, OovPhonemizer, ProofingPipeline, Synthesizer, Tokenizer};
+    use crustytts_core::{OovPhonemizer, ProofingPipeline, Synthesizer, Tokenizer};
     use crustytts_kokoro::KokoroOnnx;
     use crustytts_phonemize::{phonemize_with_oov, CustomMapping, OllamaOovPhonemizer};
     use crustytts_sentence::SentenceNormalizer;
-    use crustytts_sink::AplaySink;
     use crustytts_spellcheck::{OllamaProvider, SpellChecker};
     use crustytts_tokenizer::KokoroTokenizer;
     use crustytts_voice::load_voice;
@@ -539,8 +685,7 @@ fn speak_kokoro(text: &str) -> anyhow::Result<()> {
         audio.duration_secs()
     ));
 
-    AplaySink::new().play(&audio)?;
-    Ok(())
+    Ok(audio)
 }
 
 // ── Spelled-out word logger ─────────────────────────────────────────────────────
@@ -1207,9 +1352,7 @@ fn main() -> anyhow::Result<()> {
 
     // ── say mode (test TTS directly) ─────────────────────────────────────────
     if args.len() >= 3 && args[1] == "--say" {
-        let text = args[2..].join(" ");
-        speak(&text);
-        return Ok(());
+        return say(&args[2..]);
     }
 
     // ── spellcheck mode (test spellchecker) ──────────────────────────────────
@@ -1378,6 +1521,126 @@ fn main() -> anyhow::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn argv(items: &[&str]) -> Vec<String> {
+        items.iter().map(|s| s.to_string()).collect()
+    }
+
+    /// A path whose directory exists, so parsing does not reject it.
+    fn temp_file(name: &str) -> PathBuf {
+        env::temp_dir().join(name)
+    }
+
+    #[test]
+    fn say_plain_text_plays_and_joins_words() {
+        let a = parse_say_args(&argv(&["hello", "there"])).unwrap();
+        assert_eq!(a.text, "hello there");
+        assert_eq!(a.output, None);
+        assert_eq!(a.ogg_bitrate_kbps, None);
+    }
+
+    #[test]
+    fn say_output_and_bitrate_parse() {
+        let path = temp_file("clip.ogg");
+        let a = parse_say_args(&argv(&[
+            "--output",
+            path.to_str().unwrap(),
+            "--ogg-bitrate",
+            "48",
+            "hi",
+        ]))
+        .unwrap();
+        assert_eq!(a.output, Some(path));
+        assert_eq!(a.ogg_bitrate_kbps, Some(48));
+        assert_eq!(a.text, "hi");
+    }
+
+    #[test]
+    fn say_double_dash_lets_text_look_like_a_flag() {
+        let a = parse_say_args(&argv(&["--", "--output", "x.wav"])).unwrap();
+        assert_eq!(a.text, "--output x.wav");
+        assert_eq!(a.output, None, "flags after -- are text");
+    }
+
+    #[test]
+    fn say_unknown_option_is_an_error_not_speech() {
+        let err = parse_say_args(&argv(&["--outptu", "f.wav", "hi"])).unwrap_err();
+        assert!(err.to_string().contains("unknown option --outptu"));
+    }
+
+    #[test]
+    fn say_rejects_missing_or_flag_like_values() {
+        assert!(parse_say_args(&argv(&["--output"])).is_err());
+        assert!(parse_say_args(&argv(&["--output", "--ogg-bitrate", "48", "hi"])).is_err());
+        assert!(parse_say_args(&argv(&["--ogg-bitrate"])).is_err());
+        assert!(parse_say_args(&argv(&["--ogg-bitrate", "fast", "hi"])).is_err());
+    }
+
+    #[test]
+    fn say_rejects_repeated_options() {
+        let path = temp_file("clip.wav");
+        let p = path.to_str().unwrap();
+        assert!(parse_say_args(&argv(&["--output", p, "--output", p, "hi"])).is_err());
+    }
+
+    #[test]
+    fn say_needs_text() {
+        assert!(parse_say_args(&argv(&[])).is_err());
+        assert!(parse_say_args(&argv(&["--"])).is_err());
+    }
+
+    #[test]
+    fn say_checks_the_output_before_the_model_loads() {
+        // Unknown extension.
+        assert!(parse_say_args(&argv(&["--output", "clip.mp3", "hi"])).is_err());
+        // Directory that does not exist.
+        let missing = env::temp_dir()
+            .join("crustytts-no-such-dir")
+            .join("clip.wav");
+        assert!(parse_say_args(&argv(&["--output", missing.to_str().unwrap(), "hi"])).is_err());
+    }
+
+    #[test]
+    fn say_bitrate_must_match_the_output_format() {
+        let wav = temp_file("clip.wav");
+        let ogg = temp_file("clip.ogg");
+        // Silently ignored before this check; now an error.
+        assert!(parse_say_args(&argv(&[
+            "--output",
+            wav.to_str().unwrap(),
+            "--ogg-bitrate",
+            "48",
+            "hi"
+        ]))
+        .is_err());
+        // Needs a file at all.
+        assert!(parse_say_args(&argv(&["--ogg-bitrate", "48", "hi"])).is_err());
+        // Range is checked up front too.
+        assert!(parse_say_args(&argv(&[
+            "--output",
+            ogg.to_str().unwrap(),
+            "--ogg-bitrate",
+            "1",
+            "hi"
+        ]))
+        .is_err());
+        assert!(parse_say_args(&argv(&[
+            "--output",
+            ogg.to_str().unwrap(),
+            "--ogg-bitrate",
+            "511",
+            "hi"
+        ]))
+        .is_err());
+        assert!(parse_say_args(&argv(&[
+            "--output",
+            ogg.to_str().unwrap(),
+            "--ogg-bitrate",
+            "510",
+            "hi"
+        ]))
+        .is_ok());
+    }
 
     #[test]
     fn codex_stop_message_uses_nonempty_final_message() {
